@@ -867,8 +867,8 @@ def _rev_line(specs, end_ms):
     return line
 
 
-def test_display_lines_assign_page_span_to_reversed_lines():
-    """两行一页：页内倒放行共享 (页最早演唱起点, 页最晚演唱终点)。"""
+def test_display_lines_assign_per_line_span_to_reversed_lines():
+    """倒放行按自身演唱区间分配镜像区间（保证回退在自身窗口内可见）。"""
     line1 = _rev_line([("a", 1_000), ("b", 1_200)], end_ms=1_400)
     line2 = _rev_line([("c", 1_500), ("d", 1_700)], end_ms=1_900)
     line3 = _make_line([("e", 2_000), ("f", 2_200)], end_ms=2_400)
@@ -881,13 +881,13 @@ def test_display_lines_assign_page_span_to_reversed_lines():
         lane_gap_ms=0,
         lane_count=2,
     )
-    assert line1.reverse_span_ms == (1_000, 1_900)
-    assert line2.reverse_span_ms == (1_000, 1_900)
+    assert line1.reverse_span_ms == (1_000, 1_400)
+    assert line2.reverse_span_ms == (1_500, 1_900)
     assert line3.reverse_span_ms is None
 
 
-def test_display_lines_assign_page_span_without_blank_lines():
-    """三行一页（无空行）：页内三行共享同一镜像区间。"""
+def test_display_lines_assign_per_line_span_three_rows():
+    """三行一页（无空行）：每行仍按自身演唱区间。"""
     line1 = _rev_line([("a", 1_000), ("b", 1_200)], end_ms=1_400)
     line2 = _rev_line([("c", 1_500), ("d", 1_700)], end_ms=1_900)
     line3 = _rev_line([("e", 2_000), ("f", 2_200)], end_ms=2_400)
@@ -900,8 +900,9 @@ def test_display_lines_assign_page_span_without_blank_lines():
         lane_gap_ms=0,
         lane_count=3,
     )
-    for line in (line1, line2, line3):
-        assert line.reverse_span_ms == (1_000, 2_400)
+    assert line1.reverse_span_ms == (1_000, 1_400)
+    assert line2.reverse_span_ms == (1_500, 1_900)
+    assert line3.reverse_span_ms == (2_000, 2_400)
 
 
 def test_display_lines_span_skips_non_reversed_page():

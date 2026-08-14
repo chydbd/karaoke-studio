@@ -338,39 +338,24 @@ def _apply_reverse_spans(
     pages: Sequence[ShowTimePage],
     render_lines: Sequence[TimingLine],
 ) -> None:
-    """按显示页为倒放行分配镜像区间（渲染时计算）。
+    """为倒放行分配镜像区间（渲染时计算）。
 
-    倒放行的镜像区间决定进度条回退的跨度。这里按**真实显示页**分组（行数 /
-    分页规则决定，与 LRC 里是否有空行无关），一页内所有倒放行共享
-    ``(页内最早演唱起点, 页内最晚演唱终点)``——两句一屏或三行渲染都按页
-    回退，与显示节奏一致。页内非倒放行不参与、也不被赋值。
+    倒放行的镜像区间决定进度条回退的跨度。每行按**自身演唱区间**
+    ``(行首字符起点, 行尾)`` 回退——保证每行的回退落在它自己的显示窗口内
+    可见（页级共享区间会让早结束的行在其窗口内始终呈「已唱满」、回退不可见）。
     """
 
     for page in pages:
-        reversed_indices = [
-            line_index
-            for line_index in page.lines
-            if render_lines[line_index].reverse_playback
-            and render_lines[line_index].chars
-        ]
-        if not reversed_indices:
-            continue
-        start: Optional[int] = None
-        end: Optional[int] = None
-        for line_index in reversed_indices:
+        for line_index in page.lines:
             line = render_lines[line_index]
-            line_start = timing_line_start_ms(line)
-            if start is None or line_start < start:
-                start = line_start
-            line_end = line.end_ms
-            if line_end is None:
-                line_end = line.chars[-1].start_ms + 1000
-            if line_end is not None and (end is None or line_end > end):
-                end = line_end
-        if start is not None and end is not None and end > start:
-            span = (start, end)
-            for line_index in reversed_indices:
-                render_lines[line_index].reverse_span_ms = span
+            if not (line.reverse_playback and line.chars):
+                continue
+            start = timing_line_start_ms(line)
+            end = line.end_ms
+            if end is None:
+                end = line.chars[-1].start_ms + 1000
+            if end > start:
+                line.reverse_span_ms = (start, end)
 
 
 def _show_time_pages(
@@ -556,7 +541,9 @@ def _compute_section_ids(render_lines: list[TimingLine], section_gap: int) -> li
     for index, line in enumerate(render_lines):
         if index > 0 and section_gap > 0:
             gap = timing_line_start_ms(line) - _line_end_ms(render_lines[index - 1])
-            if gap > section_gap:
+            # 间隔过大开新段；间隔显著为负（下一行起始远早于上一行结束，
+            # 即时间轴倒挂，如文件尾部追加了更早时间的歌词）同样开新段。
+            if gap > section_gap or gap < -section_gap:
                 current += 1
         section_ids.append(current)
     return section_ids
