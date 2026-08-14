@@ -733,3 +733,96 @@ def test_n3_bottom_single_pages_alternate_only_against_immediate_page():
     assert [item.lane for item in top_aligned] == [0, 0, 0]
     # 手动时刻让三页窗口互相重叠：第 2 页被顶上一行，第 3 页又能用回最下行。
     assert [item.lane for item in n3] == [1, 0, 1]
+
+
+# ---------------------------------------------------------------------------
+# 零长度歌词跳变（_apply_zero_length_jumps）
+# ---------------------------------------------------------------------------
+
+
+def test_zero_length_tail_jumps_page_forward():
+    """页内最后一段有时长内容结束后剩余全为零长度 -> 整页在 E 结束、下一页在 E 入场。"""
+    # 头两句结构（薔薇人歪んだ / 正しくなくても見えた）：
+    # 人歪んだ@23320 与行尾同为 23320 -> 零长度；下一行整行零长度。
+    line1 = _make_line(
+        [("bara", 22_930), ("bara2", 23_200), ("hiza", 23_320), ("muda", 23_320)],
+        end_ms=23_320,
+    )
+    line2 = _make_line(
+        [("tadashi", 23_320), ("mita", 23_320)],
+        end_ms=23_320,
+    )
+    line3 = _make_line(
+        [("bara", 23_550), ("bara2", 23_700), ("hiza", 23_830), ("muda", 23_830)],
+        end_ms=23_830,
+    )
+    line4 = _make_line(
+        [("tadashi", 23_830), ("mita", 23_830)],
+        end_ms=23_830,
+    )
+    track = _track(line1, line2, line3, line4)
+
+    layouts = compute_display_lines(
+        track,
+        lead_in_ms=1800,
+        tail_ms=1000,
+        lane_gap_ms=300,
+    )
+
+    # 页面 0（L1/L2）在最后一段有时长内容结束（23_320）处立即结束，
+    # 而不是把零长度底行悬挂到行尾 + post（24_320）。
+    assert layouts[0].display_end_ms == 23_320
+    assert layouts[1].display_end_ms == 23_320
+    # 页面 1（L3/L4）在 23_320 立即入场（跳变），而非 pre 提前入场/自然入场。
+    assert layouts[2].display_start_ms == 23_320
+    assert layouts[3].display_start_ms == 23_320
+    assert layouts[2].display_end_ms == 23_830
+    assert layouts[3].display_end_ms == 23_830
+
+
+def test_zero_length_followed_by_timed_content_does_not_jump():
+    """页内零长度内容之后还有有时长内容（末段完整歌词）-> 不跳变，保持 post 悬挂。"""
+    line1 = _make_line(
+        [("bara", 26_090), ("bara2", 26_290), ("hiza", 26_650), ("muda", 26_650)],
+        end_ms=26_650,
+    )
+    line2 = _make_line(
+        [("tadashi", 26_650), ("mita", 26_800), ("eta", 26_950), ("ta", 26_950)],
+        end_ms=27_240,
+    )
+    track = _track(line1, line2)
+
+    layouts = compute_display_lines(
+        track,
+        lead_in_ms=1800,
+        tail_ms=1000,
+        lane_gap_ms=300,
+    )
+
+    # 尾页：最后一段有时长内容结束为 27_240，行保持到 +post（28_240）。
+    assert layouts[0].display_end_ms == 28_240
+    assert layouts[1].display_end_ms == 28_240
+
+
+def test_zero_length_jump_respects_manual_overrides():
+    """页内有时长内容带手工覆盖 -> 整页不跳变（手动时刻优先于自动布局调整）。"""
+    line1 = _make_line(
+        [("a", 10_000), ("b", 10_500), ("z", 11_000), ("z", 11_000)],
+        end_ms=11_000,
+    )
+    line2 = _make_line([("c", 11_000), ("d", 11_000)], end_ms=11_000)
+    line3 = _make_line([("e", 12_000), ("f", 12_500)], end_ms=13_000)
+    line1.display_end_override_ms = 30_000
+    track = _track(line1, line2, line3)
+
+    layouts = compute_display_lines(
+        track,
+        lead_in_ms=0,
+        tail_ms=1000,
+        lane_gap_ms=300,
+    )
+
+    assert layouts[0].display_end_ms == 30_000
+    # 手工覆盖抑制整页跳变：L2 保持行尾 + post（12_000），L3 按自然时刻入场。
+    assert layouts[1].display_end_ms == 12_000
+    assert layouts[2].display_start_ms == 12_000

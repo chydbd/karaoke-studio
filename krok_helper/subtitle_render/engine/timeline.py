@@ -301,6 +301,8 @@ def compute_display_lines(
         sync_ending=sync_ending,
     )
 
+    _apply_zero_length_jumps(starts, display_ends, pages, render_lines)
+
     _apply_page_lane_offsets(pages, lanes, show_times.force_bottom)
 
     result: list[DisplayLine] = []
@@ -562,6 +564,67 @@ def _synchronize_page_boundaries(
             for line in page.lines:
                 if render_lines[line].display_end_override_ms is None:
                     ends[line] = common_end
+
+
+def _apply_zero_length_jumps(
+    starts: list[int],
+    ends: list[int],
+    pages: Sequence[ShowTimePage],
+    render_lines: Sequence[TimingLine],
+) -> None:
+    """零长度歌词跳变（0 长度歌词适配）。
+
+    当一页内最后一段「有时长」的演唱结束后，剩余内容全部是零长度
+    （``start_ms == end_ms``，例如 ``[ts]人歪んだ[ts]`` 整段共享同一时间戳）时，
+    这一页立即在该时刻结束、下一页立即在该时刻入场——进度条直接跳过零长度
+    内容，而不是把它们悬挂到 ``post`` / 下一页自然入场时刻。这样零长度文字
+    永远不会被点亮（其起始时刻即页面切换时刻），下一组相同文字以未点亮状态
+    弹入，形成「倒退」的故障感。
+
+    例外：页内零长度内容之后还有「有时长」内容（例如末段完整歌词的
+    ``見えた``）时不触发跳变——零长度部分按既有的瞬时完成行为被进度条
+    跳跃过去并立即点亮，随后继续播放。
+    """
+
+    if not pages:
+        return
+    page_timed_end: list[int] = []
+    for page in pages:
+        best = 0
+        for line_index in page.lines:
+            line = render_lines[line_index]
+            if line.display_end_override_ms is not None:
+                continue
+            for start, end in compute_char_intervals(line):
+                if end > start:
+                    best = max(best, end)
+        page_timed_end.append(best)
+
+    for page_index, page in enumerate(pages):
+        jump_ms = page_timed_end[page_index]
+        if jump_ms <= 0:
+            continue
+        has_zero_tail = any(
+            not line.is_blank
+            and line.chars
+            and line.display_end_override_ms is None
+            and any(
+                start >= jump_ms
+                for start, _end in compute_char_intervals(line)
+            )
+            for line_index in page.lines
+            for line in (render_lines[line_index],)
+        )
+        if not has_zero_tail:
+            continue
+        for line_index in page.lines:
+            if render_lines[line_index].display_end_override_ms is None:
+                ends[line_index] = jump_ms
+        following = page_index + 1
+        if following < len(pages) and pages[following].section == page.section:
+            for line_index in pages[following].lines:
+                if render_lines[line_index].display_start_override_ms is None:
+                    starts[line_index] = jump_ms
 
 
 def paragraph_last_line_flags(
