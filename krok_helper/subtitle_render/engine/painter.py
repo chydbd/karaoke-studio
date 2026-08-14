@@ -581,6 +581,7 @@ from krok_helper.subtitle_render.engine.timeline import (
     char_fill_ratio,
     compute_char_intervals,
     compute_display_lines,
+    reverse_fill_time_ms,
     track_duration_ms,
 )
 from krok_helper.subtitle_render.engine.page_plan import (
@@ -6833,6 +6834,11 @@ def _paint_line(
     if animation.opacity <= 0.0:
         return
 
+    # 倒放段（[@reverse]）：行级入场/退场动画仍按真实时间，静态绘制（卡拉OK
+    # 进度填充）按镜像时间，让高亮从后往前回退。逐字入场/退场动画同样使用
+    # 镜像时间（倒放行的逐字动画属边缘场景，行为与填充保持一致）。
+    fill_t_ms = reverse_fill_time_ms(line, t_ms)
+
     def draw(target: QPainter) -> None:
         target.save()
         try:
@@ -6844,7 +6850,7 @@ def _paint_line(
                 img_h,
                 track,
                 line,
-                t_ms,
+                fill_t_ms,
                 style,
                 baseline_y=baseline_y,
                 line_x=line_x,

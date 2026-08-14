@@ -35,6 +35,7 @@ from krok_helper.subtitle_render.models import (
     TimingLine,
     TimingTrack,
     TimingTrackMeta,
+    timing_line_start_ms,
 )
 from krok_helper.subtitle_render.engine.timeline import compute_char_intervals
 
@@ -311,9 +312,19 @@ def _parse_body_lines(lines: Iterable[str]) -> list[TimingLine]:
     singer_ids: dict[str, int] = {}
     # 「角色 / 配色」标签跨行延续：上一行末尾生效的标签继续作用到下一行，直到下次切换。
     active_role: Optional[str] = None
+    # 倒放段标记（[@reverse] / [@normal] 独立行）：切换后续行的 reverse_playback。
+    reverse_active = False
 
     for raw_line in lines:
-        line, active_role = _parse_body_line(raw_line, active_role)
+        tag, content = _consume_reverse_tag(raw_line)
+        if tag == "reverse":
+            reverse_active = True
+        elif tag == "normal":
+            reverse_active = False
+        if content is None:
+            # 纯标记行（[@reverse] / [@normal]）不产生歌词行。
+            continue
+        line, active_role = _parse_body_line(content, active_role)
         if line.singer_label is not None:
             current_singer_label = line.singer_label
         elif line.chars and current_singer_label is not None:
@@ -326,9 +337,34 @@ def _parse_body_lines(lines: Iterable[str]) -> list[TimingLine]:
         # Ruby annotations resolve their owning line by this index; see
         # TimingLine.track_line_index.
         line.track_line_index = len(timing_lines)
+        line.reverse_playback = reverse_active
         timing_lines.append(line)
     _normalize_cross_line_anchors(timing_lines)
     return timing_lines
+
+
+_REVERSE_TAG_RE = re.compile(r"\[@(reverse|normal)\]")
+
+
+def _consume_reverse_tag(raw_line: str) -> tuple[Optional[str], Optional[str]]:
+    """从行首提取倒放段标记，返回 ``(tag, 剩余内容)``。
+
+    - ``[@reverse]`` / ``[@normal]`` 独立成行：返回 ``("reverse"/"normal", None)``
+      （不产生歌词行）。
+    - 标记作为行首前缀（如 ``[@reverse][00:30:00]薔...``）：返回标记与剩余内容，
+      该行按标记生效。
+    - 无标记：返回 ``(None, raw_line)``。
+    未知 ``[@...]`` 标签保持原样（交给既有解析逻辑处理）。
+    """
+    text = raw_line.strip()
+    match = _REVERSE_TAG_RE.match(text)
+    if match is None:
+        return None, raw_line
+    tag = match.group(1)
+    rest = text[match.end():].strip()
+    if not rest:
+        return tag, None
+    return tag, rest
 
 
 def _parse_body_line(

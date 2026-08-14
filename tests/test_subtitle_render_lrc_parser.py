@@ -673,3 +673,50 @@ def test_repeated_ruby_base_in_one_line_gets_one_annotation_each():
     assert sorted(
         (ruby.target_char_start, ruby.reading) for ruby in track.rubies
     ) == [(0, "け"), (1, "ろ"), (2, "け"), (3, "ろ")]
+
+
+# ---------------------------------------------------------------------------
+# 倒放段标记（[@reverse] / [@normal]）
+# ---------------------------------------------------------------------------
+
+
+def test_reverse_tag_marks_following_lines():
+    text = (
+        "[00:01:00]あ[00:01:10]\n"
+        "[@reverse]\n"
+        "[00:02:00]い[00:02:10]\n"
+        "[00:03:00]う[00:03:10]\n"
+        "[@normal]\n"
+        "[00:04:00]え[00:04:10]\n"
+    )
+    track = parse_nicokara_lrc(text)
+
+    assert [line.reverse_playback for line in track.lines] == [
+        False,
+        True,
+        True,
+        False,
+    ]
+    # 标记行本身不产生歌词行。
+    assert len(track.lines) == 4
+
+
+def test_reverse_block_marks_consecutive_lines():
+    text = (
+        "[00:01:00]あ[00:01:20]い[00:01:40]\n"
+        "[@reverse]\n"
+        "[00:02:00]う[00:02:20]え[00:02:40]\n"
+        "[00:02:40]お[00:03:00]\n"
+    )
+    track = parse_nicokara_lrc(text)
+
+    # 解析器只标记 reverse_playback；镜像区间（reverse_span_ms）由显示层按页计算。
+    assert [line.reverse_playback for line in track.lines] == [False, True, True]
+    assert all(line.reverse_span_ms is None for line in track.lines)
+
+
+def test_inline_reverse_prefix_marks_that_line():
+    text = "[00:01:00]あ[00:01:10]\n[@reverse][00:02:00]い[00:02:10]\n"
+    track = parse_nicokara_lrc(text)
+
+    assert [line.reverse_playback for line in track.lines] == [False, True]

@@ -201,6 +201,22 @@ class TimingLine:
     裸 LRC 不包含该信息；导入 N3 项目时由其 ``LineInfos`` 精确恢复，
     schema v2 项目则把它作为 ``page_plan`` 的兼容投影。
     """
+    reverse_playback: bool = False
+    """本行是否处于「倒放」段（``[@reverse]`` 标记）。
+
+    倒放段的音频是反向播放的，但歌词仍是实际文字、时间戳按正常顺序递增。
+    渲染时该行的卡拉OK进度按镜像时间 ``t' = span_start + span_end - t``
+    计算——进度条在段起始处已唱满、随时间推移高亮边界从后往前回退
+    （已唱部分像倒带一样退回去），音频本身不变。
+    """
+    reverse_span_ms: Optional[tuple[int, int]] = None
+    """倒放段的镜像区间 ``(start_ms, end_ms)``。
+
+    连续的反转行组成一个倒放块，块内所有行共享同一镜像区间（块的
+    起始 = 块内最早演唱起点，结束 = 块内最晚演唱终点），使回退按整段
+    短语的逆时间序进行（先退末尾、后退开头）。``reverse_playback`` 为
+    False 时恒为 None。
+    """
     display_start_override_ms: Optional[int] = None
     """本行「上屏时刻」手动覆盖（毫秒）。None = 按全局提前入场自动计算。
     由字幕轨道拖动写入，随项目文件持久化；覆盖值优先于自动布局。"""

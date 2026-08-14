@@ -11,6 +11,7 @@ from krok_helper.subtitle_render.engine.timeline import (
     find_active_line,
     find_upcoming_line,
     paragraph_last_line_flags,
+    reverse_fill_time_ms,
     track_duration_ms,
     visible_display_lines,
 )
@@ -826,3 +827,95 @@ def test_zero_length_jump_respects_manual_overrides():
     # 手工覆盖抑制整页跳变：L2 保持行尾 + post（12_000），L3 按自然时刻入场。
     assert layouts[1].display_end_ms == 12_000
     assert layouts[2].display_start_ms == 12_000
+
+
+# ---------------------------------------------------------------------------
+# 倒放段镜像时间（reverse_fill_time_ms）
+# ---------------------------------------------------------------------------
+
+
+def _reverse_line(start_ms, end_ms, span=None):
+    line = _make_line([("a", start_ms), ("b", start_ms + 100)], end_ms=end_ms)
+    line.reverse_playback = True
+    line.reverse_span_ms = span
+    return line
+
+
+def test_reverse_fill_time_mirrors_within_line_span():
+    line = _reverse_line(1_000, 2_000)
+    assert reverse_fill_time_ms(line, 1_000) == 2_000
+    assert reverse_fill_time_ms(line, 1_500) == 1_500
+    assert reverse_fill_time_ms(line, 2_000) == 1_000
+    assert reverse_fill_time_ms(line, 2_500) == 500
+
+
+def test_reverse_fill_time_uses_block_span_when_set():
+    line = _reverse_line(1_000, 2_000, span=(500, 3_000))
+    assert reverse_fill_time_ms(line, 1_000) == 2_500
+    assert reverse_fill_time_ms(line, 3_000) == 500
+
+
+def test_reverse_fill_time_passthrough_for_normal_lines():
+    line = _make_line([("a", 1_000)], end_ms=2_000)
+    assert reverse_fill_time_ms(line, 1_500) == 1_500
+    assert reverse_fill_time_ms(line, 2_000) == 2_000
+
+
+def _rev_line(specs, end_ms):
+    line = _make_line(specs, end_ms=end_ms)
+    line.reverse_playback = True
+    return line
+
+
+def test_display_lines_assign_page_span_to_reversed_lines():
+    """两行一页：页内倒放行共享 (页最早演唱起点, 页最晚演唱终点)。"""
+    line1 = _rev_line([("a", 1_000), ("b", 1_200)], end_ms=1_400)
+    line2 = _rev_line([("c", 1_500), ("d", 1_700)], end_ms=1_900)
+    line3 = _make_line([("e", 2_000), ("f", 2_200)], end_ms=2_400)
+    track = _track(line1, line2, line3)
+
+    compute_display_lines(
+        track,
+        lead_in_ms=0,
+        tail_ms=0,
+        lane_gap_ms=0,
+        lane_count=2,
+    )
+    assert line1.reverse_span_ms == (1_000, 1_900)
+    assert line2.reverse_span_ms == (1_000, 1_900)
+    assert line3.reverse_span_ms is None
+
+
+def test_display_lines_assign_page_span_without_blank_lines():
+    """三行一页（无空行）：页内三行共享同一镜像区间。"""
+    line1 = _rev_line([("a", 1_000), ("b", 1_200)], end_ms=1_400)
+    line2 = _rev_line([("c", 1_500), ("d", 1_700)], end_ms=1_900)
+    line3 = _rev_line([("e", 2_000), ("f", 2_200)], end_ms=2_400)
+    track = _track(line1, line2, line3)
+
+    compute_display_lines(
+        track,
+        lead_in_ms=0,
+        tail_ms=0,
+        lane_gap_ms=0,
+        lane_count=3,
+    )
+    for line in (line1, line2, line3):
+        assert line.reverse_span_ms == (1_000, 2_400)
+
+
+def test_display_lines_span_skips_non_reversed_page():
+    """页内无倒放行时不赋镜像区间。"""
+    line1 = _make_line([("a", 1_000)], end_ms=1_200)
+    line2 = _make_line([("b", 1_500)], end_ms=1_700)
+    track = _track(line1, line2)
+
+    compute_display_lines(
+        track,
+        lead_in_ms=0,
+        tail_ms=0,
+        lane_gap_ms=0,
+        lane_count=2,
+    )
+    assert line1.reverse_span_ms is None
+    assert line2.reverse_span_ms is None

@@ -303,6 +303,8 @@ def compute_display_lines(
 
     _apply_zero_length_jumps(starts, display_ends, pages, render_lines)
 
+    _apply_reverse_spans(pages, render_lines)
+
     _apply_page_lane_offsets(pages, lanes, show_times.force_bottom)
 
     result: list[DisplayLine] = []
@@ -330,6 +332,45 @@ def compute_display_lines(
             )
         )
     return result
+
+
+def _apply_reverse_spans(
+    pages: Sequence[ShowTimePage],
+    render_lines: Sequence[TimingLine],
+) -> None:
+    """按显示页为倒放行分配镜像区间（渲染时计算）。
+
+    倒放行的镜像区间决定进度条回退的跨度。这里按**真实显示页**分组（行数 /
+    分页规则决定，与 LRC 里是否有空行无关），一页内所有倒放行共享
+    ``(页内最早演唱起点, 页内最晚演唱终点)``——两句一屏或三行渲染都按页
+    回退，与显示节奏一致。页内非倒放行不参与、也不被赋值。
+    """
+
+    for page in pages:
+        reversed_indices = [
+            line_index
+            for line_index in page.lines
+            if render_lines[line_index].reverse_playback
+            and render_lines[line_index].chars
+        ]
+        if not reversed_indices:
+            continue
+        start: Optional[int] = None
+        end: Optional[int] = None
+        for line_index in reversed_indices:
+            line = render_lines[line_index]
+            line_start = timing_line_start_ms(line)
+            if start is None or line_start < start:
+                start = line_start
+            line_end = line.end_ms
+            if line_end is None:
+                line_end = line.chars[-1].start_ms + 1000
+            if line_end is not None and (end is None or line_end > end):
+                end = line_end
+        if start is not None and end is not None and end > start:
+            span = (start, end)
+            for line_index in reversed_indices:
+                render_lines[line_index].reverse_span_ms = span
 
 
 def _show_time_pages(
@@ -867,6 +908,33 @@ def char_fill_ratio(char_start_ms: int, char_end_ms: int, t_ms: int) -> float:
         return 1.0
     duration = max(char_end_ms - char_start_ms, 1)
     return (t_ms - char_start_ms) / duration
+
+
+def reverse_fill_time_ms(line: TimingLine, t_ms: int) -> int:
+    """倒放段（``line.reverse_playback``）的镜像填充时间。
+
+    倒放段的音频是反向播放的，但歌词仍是实际文字、时间戳按正常顺序递增。
+    进度条按镜像时间 ``t' = span_start + span_end - t`` 计算——段起始处
+    已唱满、随时间推移高亮边界从后往前回退（已唱部分像倒带一样退回去），
+    音频本身不变。镜像区间取倒放块的 ``reverse_span_ms``（块内所有行共享，
+    回退按整段短语的逆时间序进行）；手工构造的行退化为行自身区间。
+    非倒放行原样返回 ``t_ms``。
+    """
+    if not line.reverse_playback:
+        return t_ms
+    if line.reverse_span_ms is not None:
+        start, end = line.reverse_span_ms
+    else:
+        start = timing_line_start_ms(line)
+        if line.end_ms is not None:
+            end = line.end_ms
+        elif line.chars:
+            end = line.chars[-1].start_ms + 1000
+        else:
+            return t_ms
+    if end <= start:
+        return t_ms
+    return start + end - t_ms
 
 
 def track_duration_ms(track: TimingTrack) -> int:
