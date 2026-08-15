@@ -749,6 +749,7 @@ def test_build_render_ir_uses_compressed_entry_and_exit_animation_windows():
         entry_lead_ms=900,
         exit_anim="slide_out",
         exit_fade_ms=800,
+        entry_exit_cap_ms=None,
     )
 
     lines = build_render_ir(track, style, width=640, height=360, fps=60)["track"][

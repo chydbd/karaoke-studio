@@ -606,7 +606,9 @@ def test_paint_frame_outside_any_line_leaves_image_unchanged(qapp):
 def test_paint_frame_uses_default_line_lead_in(qapp):
     img = _blank()
     baseline = _pixel_hash(img)
-    paint_frame(img, _track(), 500, Style())  # 默认提前 1800ms 显示
+    paint_frame(img, _track(), 500, Style())  # 默认进退场上限 200ms：500ms 尚未显示
+    assert _pixel_hash(img) == baseline
+    paint_frame(img, _track(), 900, Style())  # 行起点 1000ms，提前 200ms 显示
     assert _pixel_hash(img) != baseline
 
 
@@ -2024,6 +2026,7 @@ def test_paint_frame_applies_inline_role_styles_with_mixed_font_sizes(qapp):
         stroke2_width_px=0,
         shadow_offset_x=0,
         shadow_offset_y=0,
+        entry_exit_cap_ms=None,
         custom_style_schemes={
             "1配色": SubtitleStyleScheme(
                 font_size_px=96,
@@ -2183,6 +2186,7 @@ def test_utopia_exit_keeps_full_fill_when_ruby_progress_lags(qapp):
         font_size_px=96,
         line_y_position="center",
         line_tail_ms=2000,  # tail_delay=2000-750=1250 → group_done=2000+1250=3250
+        entry_exit_cap_ms=None,
         exit_anim="utopia",
         stroke_width_px=0,
         stroke2_width_px=0,
@@ -2956,7 +2960,7 @@ def test_dual_line_cpu_visibility_is_projected_from_shared_layout_plan(
 def test_shared_track_layout_plan_cache_reuses_and_invalidates_mutable_inputs(qapp):
     clear_before_layer_cache()
     track = _two_line_track()
-    style = Style(dual_line_layout=True)
+    style = Style(dual_line_layout=True, entry_exit_cap_ms=None)
 
     first = subtitle_painter.build_track_layout_plan(
         track, style, logical_w=640, logical_h=360
@@ -5661,6 +5665,7 @@ def test_image_fill_before_and_after_layers_share_text_anchor(qapp, tmp_path):
         stroke2_width_px=0,
         shadow_color="",
         line_y_position="center",
+        entry_exit_cap_ms=None,
         karaoke_colors=colors,
     )
     before_only = _blank()
@@ -6028,6 +6033,7 @@ def test_utopia_gradient_glow_caches_alpha_mask_not_coloured_bitmap(
         line_y_position="center",
         entry_anim="utopia",
         exit_anim="utopia",
+        entry_exit_cap_ms=None,
     )
     blits = 0
     original = subtitle_painter._blit_cached_run_glow
@@ -6466,7 +6472,12 @@ def test_paint_frame_utopia_exit_does_not_reappear_after_flying_out(qapp):
     blank = _blank()
     plain = _blank()
     utopia = _blank()
-    base = Style(line_y_position="center", line_tail_ms=1100, exit_fade_ms=1000)
+    base = Style(
+        line_y_position="center",
+        line_tail_ms=1100,
+        exit_fade_ms=1000,
+        entry_exit_cap_ms=None,
+    )
 
     paint_frame(plain, track, 3599, base)
     paint_frame(utopia, track, 3599, replace(base, exit_anim="utopia"))
@@ -6620,6 +6631,7 @@ def test_utopia_keeps_one_render_path_before_and_during_wipe(qapp):
         glow_after_radius_px=8,
         karaoke_colors=colors,
         entry_anim="utopia",
+        entry_exit_cap_ms=None,
     )
     windows = display_windows_for_style(track, style)
     intervals = compute_char_intervals(line)
@@ -6946,6 +6958,7 @@ def test_title_overlay_draws_below_lyrics(qapp):
         stroke_width_px=0,
         stroke2_width_px=0,
         decoration_kind="none",
+        entry_exit_cap_ms=None,
         karaoke_colors=KaraokeColors(
             before=KaraokeColorState(text=_solid_fill("#FF0000")),
             after=KaraokeColorState(text=_solid_fill("#FF0000")),
@@ -9216,7 +9229,12 @@ def test_display_windows_for_style_maps_line_indices_and_overrides():
     line2 = TimingLine(chars=[TimingChar("い", 20000)], end_ms=21000)
     line2.display_end_override_ms = 30000
     track = TimingTrack(lines=[line1, blank, line2])
-    style = replace(Style(), line_lead_in_ms=1000, line_tail_ms=500)
+    style = replace(
+        Style(),
+        line_lead_in_ms=1000,
+        line_tail_ms=500,
+        entry_exit_cap_ms=None,
+    )
 
     windows = display_windows_for_style(track, style)
 
@@ -9483,20 +9501,20 @@ def test_cross_page_spatial_mode_squeezes_only_pixel_conflicting_lines(qapp):
 
     # 页级衔接已经把顺序页之间的跨页窗口重叠消除，legacy（允许跨页重叠）
     # 与 normal 无需再靠像素级挤压解决 B/D 冲突，因此两者完全一致。
+    # 默认进退场上限 200ms：每行入场 = 自身演唱开始 - 200，页内共同退场
+    # 让前一页两行一起结束在本页最晚演唱结束 + 200。
     assert normal == legacy
     assert normal == {
-        0: (8_200, 14_000),
-        1: (10_700, 14_000),
-        2: (14_000, 18_000),
-        3: (14_200, 18_000),
+        0: (9_800, 13_700),
+        1: (12_300, 13_700),
+        2: (14_000, 17_200),
+        3: (15_800, 17_200),
     }
-    # B 的 lead-in 保持完整；页内共同退场让 A 随 B 一起消失，B 的 tail
-    # 被页级衔接裁到下一页演唱开始 14_000，而不是被像素冲突继续挤压。
-    assert normal[0] == (8_200, 14_000)
-    assert normal[2] == (14_000, 18_000)
-    assert normal[0][1] == normal[1][1] == lines[2].chars[0].start_ms
-    assert normal[1][0] == lines[1].chars[0].start_ms - 1_800
-    assert normal[3][0] == lines[3].chars[0].start_ms - 1_800
+    assert normal[0] == (9_800, 13_700)
+    assert normal[1] == (12_300, 13_700)
+    assert normal[2] == (14_000, 17_200)
+    assert normal[1][0] == lines[1].chars[0].start_ms - 200
+    assert normal[3][0] == lines[3].chars[0].start_ms - 200
     assert all(
         start <= lines[index].chars[0].start_ms
         and end >= int(lines[index].end_ms)
@@ -9546,7 +9564,7 @@ def test_overlap_mode_only_drops_avoidance_and_keeps_the_timing_pipeline(qapp):
     # modes, so there is no avoidance-only difference left.
     assert {index for index in normal if normal[index] != overlap[index]} == set()
     assert normal == overlap
-    assert normal[1] == (10_700, 14_000)
+    assert normal[1] == (12_300, 13_700)
     assert overlap[1] == normal[1]
 
 
@@ -9599,16 +9617,17 @@ def test_overlap_mode_computes_page_sync_identically(
     # page hugging removes the only cross-page overlap, so they are identical.
     assert {index for index in normal if normal[index] != overlap[index]} == set()
     assert normal == overlap
-    assert normal[1][1] == 14_000
+    assert normal[1][1] == 13_700
     assert overlap[1] == normal[1]
     # Entries -- the side page sync drives here -- are byte-identical.
     assert all(normal[index][0] == overlap[index][0] for index in normal)
     if sync_entry:
-        # Page 1 reaches full sync; page 2's lower line is held back by the
-        # previous page in both modes, and is held back by the same amount.
+        # Page 1 reaches full sync; page 2's lower line starts at its own
+        # sing start (16_000 - 200 = 15_800) without sync, and full sync
+        # pulls it forward to C's entry 14_000 in both modes.
         assert normal[0][0] == normal[1][0]
-        assert normal[2][0] != normal[3][0]
-        assert overlap[2][0] != overlap[3][0]
+        assert normal[2][0] == normal[3][0]
+        assert overlap[2][0] == overlap[3][0]
 
 
 def test_animation_guard_extends_zero_tail_exit_and_delays_next_entry(qapp):
@@ -9648,14 +9667,14 @@ def test_animation_guard_extends_zero_tail_exit_and_delays_next_entry(qapp):
         track, animated, logical_w=1920, logical_h=1080
     )
 
-    # 页内共同退场让 A 随 B 一起消失：plain 第一页两行都结束在下一页演唱
-    # 开始 117_560。
-    assert plain_windows[0][1] == plain_windows[1][1] == 117_560
+    # 页内共同退场让 A 随 B 一起消失：plain 第一页两行都结束在 B 的有效
+    # 演唱结束 + 200ms = 117_440。
+    assert plain_windows[0][1] == plain_windows[1][1] == 117_440
     assert plain_windows[2][0] == 117_560
     # 动画守卫仍把 C 的入场推到演唱开始前 250ms 的动画窗（117_310），
     # 并把 A 的退场压到 C 入场前一个 lane gap（117_010），避免跨页动画重叠。
     assert animated_windows[0][1] == 117_010
-    assert animated_windows[1][1] == plain_windows[1][1]
+    assert animated_windows[1][1] == 117_490
     assert animated_windows[2][0] == 117_310
     assert animated_windows[0][1] == (
         animated_windows[2][0] - animated.line_lane_gap_ms
@@ -9933,6 +9952,7 @@ def test_non_overlapping_layouts_keep_full_entry_and_exit_windows(qapp):
         entry_lead_ms=300,
         exit_anim="fade",
         exit_fade_ms=300,
+        entry_exit_cap_ms=None,
     )
     lines = [
         TimingLine(chars=[TimingChar("下", 10_000)], end_ms=12_000),
@@ -9989,8 +10009,8 @@ def test_sync_entry_is_controlled_only_by_its_switch(qapp):
         logical_h=1080,
     )
 
-    assert [independent[index][0] for index in range(2)] == [8_200, 10_200]
-    assert [synchronized[index][0] for index in range(2)] == [8_200, 8_200]
+    assert [independent[index][0] for index in range(2)] == [9_800, 11_800]
+    assert [synchronized[index][0] for index in range(2)] == [9_800, 9_800]
 
 
 def test_page_sync_boundary_extension_never_shortens_existing_windows():
@@ -10061,10 +10081,10 @@ def test_page_ts_sync_entry_uses_colliding_previous_line_as_read_only_bound(qapp
     assert synchronized[0][1] == baseline[0][1]
     assert synchronized[1][1] == baseline[1][1]
     assert synchronized[2][0] == baseline[2][0]
-    # 页级衔接把 B 的出场裁到下一页演唱开始 14_000；D 的 lead-in 仍为
-    # 14_200，不低于这个只读碰撞边界，因此同步入场无需拉动 D。
-    assert baseline[1][1] == 14_000
-    assert synchronized[3][0] == 14_200
+    # 页内共同退场 + 200ms 上限让 B 的出场为 13_700；D 的 baseline 入场
+    # 为 15_800，同步入场可把它拉到 C 的入场 14_000，不早于碰撞边界。
+    assert baseline[1][1] == 13_700
+    assert synchronized[3][0] == 14_000
     assert synchronized[3][0] >= baseline[1][1]
     offsets = subtitle_painter.resolved_page_offsets_for_style(
         1920,
@@ -10112,11 +10132,11 @@ def test_page_ts_sync_ending_uses_colliding_next_line_as_read_only_bound(qapp):
 
     assert synchronized[2] == baseline[2]
     assert synchronized[3] == baseline[3]
-    # 页级衔接 + 页内共同退场让第一页两行都结束在 12_500；两页演唱间隔
-    # 2500ms > 1000ms，长间隔留白让下一页从自身演唱开始 14_000 入场，
-    # 同步出场不会侵入这段空白，因此与 baseline 一致。
-    assert baseline[0][1] == 12_500
-    assert synchronized[0][1] == 12_500
+    # 页级衔接 + 页内共同退场让第一页两行都结束在 B 的有效演唱结束
+    # + 200ms = 11_700；两页演唱间隔 > 1000ms，长间隔留白让下一页从自身
+    # 演唱开始 14_000 入场，同步出场不会侵入这段空白，因此与 baseline 一致。
+    assert baseline[0][1] == 11_700
+    assert synchronized[0][1] == 11_700
     assert synchronized[1][1] == baseline[1][1]
     assert baseline[2][0] == 14_000
     assert synchronized[0][1] < baseline[2][0]

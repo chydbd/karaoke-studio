@@ -3872,6 +3872,7 @@ def _display_line_compute_kwargs(style: Style) -> dict[str, object]:
         "auto_entry_reserve_ms_of": _auto_entry_reserve_resolver(style),
         "entry_animation_ms_of": _entry_animation_resolver(style),
         "exit_animation_ms_of": _exit_animation_resolver(style),
+        "entry_exit_cap_ms": style.entry_exit_cap_ms,
     }
 
 
@@ -5228,7 +5229,11 @@ def _display_style_for_signal_window(style: Style) -> Style:
     signal_lead = _signal_lead_in_ms(style)
     if signal_lead <= max(style.line_lead_in_ms, 0):
         return style
-    return replace(style, line_lead_in_ms=signal_lead)
+    return replace(
+        style,
+        line_lead_in_ms=signal_lead,
+        entry_exit_cap_ms=None,
+    )
 
 
 def _signal_lead_in_ms(style: Style) -> int:

@@ -205,6 +205,7 @@ def compute_display_lines(
     squeeze_pairs: Optional[Sequence[tuple[int, int]]] = None,
     dynamic_single_page_reflow: bool = True,
     independent_line_entry: bool = False,
+    entry_exit_cap_ms: Optional[int] = None,
 ) -> list[DisplayLine]:
     """Compute NicoKara display windows for all renderable lines.
 
@@ -312,6 +313,11 @@ def compute_display_lines(
     _apply_page_common_exit(
         starts, display_ends, pages, render_lines, squeeze_pairs
     )
+
+    if entry_exit_cap_ms is not None:
+        _apply_entry_exit_duration_cap(
+            starts, display_ends, pages, render_lines, entry_exit_cap_ms
+        )
 
     _apply_reverse_spans(pages, render_lines)
 
@@ -814,6 +820,55 @@ def _apply_page_common_exit(
                 continue
             if ends[index] < common_end:
                 ends[index] = common_end
+
+
+def _apply_entry_exit_duration_cap(
+    starts: list[int],
+    ends: list[int],
+    pages: Sequence[ShowTimePage],
+    render_lines: Sequence[TimingLine],
+    cap_ms: int,
+) -> None:
+    """进退场时长上限：除同组共同退场外，进退场都不超过 ``cap_ms``。
+
+    对每行歌词，入场（显示开始到有效演唱开始）超过 ``cap_ms`` 时推迟到
+    演唱开始前 ``cap_ms``；每页共同退场时间超过本页最晚有效演唱结束后
+    ``cap_ms`` 时，把整页退场提前到该上限。页内较早结束的行因为共同退场
+    约束仍可拥有超过 ``cap_ms`` 的退场（这是唯一例外）。
+    """
+
+    cap = max(int(cap_ms), 0)
+
+    # 入场：只推迟，不提前；以有效演唱开始（倒放行取镜像窗口起点）为界。
+    for index, line in enumerate(render_lines):
+        if line.display_start_override_ms is not None:
+            continue
+        entry_target = _line_effective_start_ms(line) - cap
+        if starts[index] < entry_target:
+            starts[index] = entry_target
+
+    # 退场：按页处理，保留同组共同退场；以有效演唱结束为界，只提前不推迟。
+    # 倒放行有自己的镜像退场窗口（末字 + 500ms），不参与本上限。
+    for page in pages:
+        latest_sing_end = 0
+        has_timed = False
+        for index in page.lines:
+            line = render_lines[index]
+            if line.display_end_override_ms is not None or line.reverse_playback:
+                continue
+            end = _line_effective_end_ms(line)
+            if end > 0:
+                has_timed = True
+                latest_sing_end = max(latest_sing_end, end)
+        if not has_timed:
+            continue
+        cap_end = latest_sing_end + cap
+        for index in page.lines:
+            line = render_lines[index]
+            if line.display_end_override_ms is not None or line.reverse_playback:
+                continue
+            if ends[index] > cap_end:
+                ends[index] = cap_end
 
 
 def _apply_short_gap_exit_priority(

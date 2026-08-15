@@ -1241,6 +1241,9 @@ class Style:
     line_tail_ms: int = 1000
     """表示结束至少延续到同组两行歌唱结束后的毫秒数。"""
 
+    entry_exit_cap_ms: Optional[int] = 200
+    """普通歌词进退场时长上限；``None`` 关闭上限（信号灯窗口等不使用）。"""
+
     line_protect_ms: int = 0
     """同 lane 冲突挤压时保留的显示时间；0 表示按 lead/tail 与退场动画自动计算。"""
 

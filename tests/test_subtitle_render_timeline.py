@@ -1080,10 +1080,10 @@ def test_display_windows_for_style_reverse_decreasing():
     track = _track(line1)
     style = Style()
     start, end = display_windows_for_style(track, style)[0]
-    lead = max(style.line_lead_in_ms, 0)
     tail = max(style.line_tail_ms, 0)
     assert start <= end
-    assert start == max(9_360 - lead, 0)
+    # 默认进退场上限 200ms：倒放行入场也按有效窗口起点回退 200ms。
+    assert start == max(9_360 - style.entry_exit_cap_ms, 0)
     assert end == 10_040 + tail
 
 
