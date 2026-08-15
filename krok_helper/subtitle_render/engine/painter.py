@@ -576,6 +576,8 @@ def _layout_cache_sig(track: TimingTrack, display_style: Style) -> tuple | None:
 
 from krok_helper.subtitle_render.engine.timeline import (
     DisplayLine,
+    _reverse_decreasing,
+    _reverse_line_window,
     apply_display_overrides,
     assign_lanes,
     char_fill_ratio,
@@ -4921,6 +4923,14 @@ def display_windows_for_style(
     tail = max(style.line_tail_ms, 0)
     for index, line in enumerate(track.lines):
         if line.is_blank or not line.chars:
+            continue
+        if _reverse_decreasing(line):
+            # 递减倒放行：原始行首 ts（最大）> line.end_ms（下一行首 ts），
+            # 窗口会倒置/为空；用有效窗口（末字符 ts, 首字符 ts + 行尾停留）
+            start, end = _reverse_line_window(line)
+            display_start = max(start - lead, 0)
+            display_end = end + tail
+            windows[index] = apply_display_overrides(line, display_start, display_end)
             continue
         display_start = max(_line_start_ms(line) - lead, 0)
         display_end = _line_end_ms(line) + tail

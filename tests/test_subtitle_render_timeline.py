@@ -1009,3 +1009,19 @@ def test_track_duration_uses_reverse_effective_window():
     track = _track(line1)
     # 未修前会取 line.end_ms=8100 或末字+1000=10360；有效窗口 end = 9540+500
     assert track_duration_ms(track) == 10_040
+
+
+def test_display_windows_for_style_reverse_decreasing():
+    """GUI 时间轴窗口把手条对递减倒放行返回有效窗口（不因 start>end 而空）。"""
+    from krok_helper.subtitle_render.engine.painter import display_windows_for_style
+    from krok_helper.subtitle_render.models import Style
+
+    line1 = _rev_dec_line([("一", 9_540), ("回", 9_360)], end_ms=8_100)
+    track = _track(line1)
+    style = Style()
+    start, end = display_windows_for_style(track, style)[0]
+    lead = max(style.line_lead_in_ms, 0)
+    tail = max(style.line_tail_ms, 0)
+    assert start <= end
+    assert start == max(9_360 - lead, 0)
+    assert end == 10_040 + tail
