@@ -219,10 +219,11 @@ def test_compute_display_lines_matches_n3_top_long_two_lane_model():
     # 页级时长衔接（page hugging）后，顺序演唱的相邻页首行不提前到上一页
     # 显示窗口内、上一页尾行不拖进下一页演唱：上行 start 被裁到上一页结束/
     # 自身演唱开始，下行 end 被裁到下一页演唱开始，避免跨页图层混合。
+    # 同一页两行再共同退场（随最晚消失的行），无冲突时不会一先一后消失。
     assert [(item.lane, item.display_start_ms, item.display_end_ms) for item in layouts] == [
-        (0, 53_690, 60_440),
+        (0, 53_690, 62_540),
         (1, 53_690, 62_540),
-        (0, 62_540, 69_880),
+        (0, 62_540, 71_980),
         (1, 63_770, 71_980),
         (0, 71_980, 80_240),
         (1, 73_040, 80_240),
@@ -285,7 +286,7 @@ def test_compute_display_lines_never_cuts_before_own_sing_end():
     )
 
     assert [(item.display_start_ms, item.display_end_ms) for item in layouts] == [
-        (38_730, 44_840),  # 上行：下一页上屏 45_530 − IntervalTime 300 之前被挤压过
+        (38_730, 45_530),  # 上行：共同退场随下行一起消失（页级衔接的下页演唱开始）
         (38_730, 45_530),  # 下行：页级衔接把 tail 裁到下一页演唱开始（不拖进下一页）
         (45_530, 49_040),
     ]
@@ -325,13 +326,41 @@ def test_compute_display_lines_keeps_next_line_protected_lead_in():
     )
 
     assert [(item.display_start_ms, item.display_end_ms) for item in layouts] == [
-        (0, 8_700),
+        (0, 10_700),
         (0, 10_700),
         (10_700, 13_000),
         (10_700, 13_000),
     ]
     # 第 2 页下行紧跟上一页下行消失（IntervalTime 已被挤压吃掉），但仍早于开唱。
     assert layouts[3].display_start_ms <= line4.chars[0].start_ms
+
+
+def test_compute_display_lines_common_exit_keeps_page_lines_together():
+    # 同一页两行无冲突时一起消失（随最晚消失的行）；页级衔接仍保证
+    # 上一页最晚消失时间 = 下一页演唱开始，不制造跨页重叠。
+    line1 = _make_line([("a", 10_000)], end_ms=11_000)
+    line2 = _make_line([("b", 11_500)], end_ms=13_500)
+    line3 = _make_line([("c", 14_000)], end_ms=15_000)
+    line4 = _make_line([("d", 16_000)], end_ms=17_000)
+    track = _track(line1, line2, line3, line4)
+
+    layouts = compute_display_lines(
+        track,
+        lead_in_ms=1800,
+        tail_ms=1000,
+        lane_gap_ms=300,
+    )
+
+    assert [(item.lane, item.display_start_ms, item.display_end_ms) for item in layouts] == [
+        (0, 8_200, 14_000),
+        (1, 8_200, 14_000),
+        (0, 14_000, 18_000),
+        (1, 14_200, 18_000),
+    ]
+    # 上一页两行都与下一页同时结束/开始（半开区间不重叠），且都晚于自身演唱结束。
+    assert layouts[0].display_end_ms == layouts[1].display_end_ms == layouts[2].display_start_ms
+    assert layouts[0].display_end_ms >= line1.end_ms
+    assert layouts[1].display_end_ms >= line2.end_ms
 
 
 def test_compute_display_lines_has_no_max_hold_cap():
@@ -575,9 +604,10 @@ def test_red_fraction_page_sync_does_not_extend_to_section_end():
     sync = compute_display_lines(track, sync_ending=True, **settings)
 
     assert [item.lane for item in nosync] == [0, 1, 0, 0]
-    assert [item.display_end_ms for item in nosync] == [66_865, 68_515, 73_065, 87_915]
-    # 前两行属于第一页，第三行是同 section 的下一页；页级衔接把第二行 tail
-    # 裁到下一页演唱开始，页级同步也不能跨页把第二行延长到第三行结束。
+    assert [item.display_end_ms for item in nosync] == [68_515, 68_515, 73_065, 87_915]
+    # 前两行属于第一页，第三行是同 section 的下一页；页级衔接把第一页 tail
+    # 裁到下一页演唱开始，页内共同退场让两行一起消失。页级同步也不能跨页
+    # 把第一页延长到第三行结束，所以 sync 与 nosync 一致。
     assert [item.display_end_ms for item in sync] == [
         68_515,
         68_515,

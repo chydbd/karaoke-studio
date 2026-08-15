@@ -9485,17 +9485,17 @@ def test_cross_page_spatial_mode_squeezes_only_pixel_conflicting_lines(qapp):
     # 与 normal 无需再靠像素级挤压解决 B/D 冲突，因此两者完全一致。
     assert normal == legacy
     assert normal == {
-        0: (8_200, 12_000),
+        0: (8_200, 14_000),
         1: (10_700, 14_000),
         2: (14_000, 18_000),
         3: (14_200, 18_000),
     }
-    # B 的 lead-in 保持完整；tail 被页级衔接裁到下一页演唱开始 14_000，
-    # 而不是被像素冲突继续挤压到 14_200。
-    assert normal[0] == (8_200, 12_000)
+    # B 的 lead-in 保持完整；页内共同退场让 A 随 B 一起消失，B 的 tail
+    # 被页级衔接裁到下一页演唱开始 14_000，而不是被像素冲突继续挤压。
+    assert normal[0] == (8_200, 14_000)
     assert normal[2] == (14_000, 18_000)
+    assert normal[0][1] == normal[1][1] == lines[2].chars[0].start_ms
     assert normal[1][0] == lines[1].chars[0].start_ms - 1_800
-    assert normal[1][1] == lines[2].chars[0].start_ms
     assert normal[3][0] == lines[3].chars[0].start_ms - 1_800
     assert all(
         start <= lines[index].chars[0].start_ms
@@ -9648,11 +9648,18 @@ def test_animation_guard_extends_zero_tail_exit_and_delays_next_entry(qapp):
         track, animated, logical_w=1920, logical_h=1080
     )
 
-    assert plain_windows[0][1] == lines[0].end_ms
-    assert animated_windows[0][1] == lines[0].end_ms + 250
-    # 页级衔接把 C 的入场推到演唱开始前 250ms 的动画窗（117_310），
-    # 而不是紧贴上一行退场结束再加 lane gap（115_794 + 300 = 116_094）。
+    # 页内共同退场让 A 随 B 一起消失：plain 第一页两行都结束在下一页演唱
+    # 开始 117_560。
+    assert plain_windows[0][1] == plain_windows[1][1] == 117_560
+    assert plain_windows[2][0] == 117_560
+    # 动画守卫仍把 C 的入场推到演唱开始前 250ms 的动画窗（117_310），
+    # 并把 A 的退场压到 C 入场前一个 lane gap（117_010），避免跨页动画重叠。
+    assert animated_windows[0][1] == 117_010
+    assert animated_windows[1][1] == plain_windows[1][1]
     assert animated_windows[2][0] == 117_310
+    assert animated_windows[0][1] == (
+        animated_windows[2][0] - animated.line_lane_gap_ms
+    )
     assert lines[2].chars[0].start_ms - animated_windows[2][0] >= 250
 
 
@@ -10105,12 +10112,12 @@ def test_page_ts_sync_ending_uses_colliding_next_line_as_read_only_bound(qapp):
 
     assert synchronized[2] == baseline[2]
     assert synchronized[3] == baseline[3]
-    # 页级衔接后 A 的普通排期被 C 压到 11_900；同步出场可延到 A 自身
-    # 的 tail（12_200），但不能侵入 C 入场前的间隔。
-    assert baseline[0][1] == 11_900
-    assert synchronized[0][1] == 12_200
+    # 页级衔接 + 页内共同退场让第一页两行都结束在下一页演唱开始 12_500；
+    # 同步出场没有额外空间可延，也不会侵入下一页，因此与 baseline 一致。
+    assert baseline[0][1] == 12_500
+    assert synchronized[0][1] == 12_500
     assert synchronized[1][1] == baseline[1][1]
-    assert synchronized[0][1] + base_style.line_lane_gap_ms <= baseline[2][0]
+    assert synchronized[0][1] == baseline[2][0]
 
 
 def test_page_sync_boundary_scans_past_non_colliding_intermediate_page():

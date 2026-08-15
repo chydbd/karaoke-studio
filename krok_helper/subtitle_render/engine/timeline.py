@@ -305,6 +305,10 @@ def compute_display_lines(
 
     _apply_page_boundary_hugging(starts, display_ends, pages, render_lines)
 
+    _apply_page_common_exit(
+        starts, display_ends, pages, render_lines, squeeze_pairs
+    )
+
     _apply_reverse_spans(pages, render_lines)
 
     _apply_page_lane_offsets(pages, lanes, show_times.force_bottom)
@@ -764,6 +768,48 @@ def _apply_page_boundary_hugging(
                 if zero_length and ends[line_index] < natural_page_end:
                     ends[line_index] = natural_page_end
         prev_display_end = max(prev_display_end, page_display_end)
+
+
+def _apply_page_common_exit(
+    starts: list[int],
+    ends: list[int],
+    pages: Sequence[ShowTimePage],
+    render_lines: Sequence[TimingLine],
+    squeeze_pairs: Optional[Sequence[tuple[int, int]]] = None,
+) -> None:
+    """页内共同退场：同一页的歌词在无冲突时一起消失（随最晚消失的行）。
+
+    双行模式下同一页的两行经常先后结束（前句先唱完、后句还有走字），
+    前句过早消失会让轨道出现空白等待。这里只延长、不缩短：把页内无手动
+    覆盖的行延长到本页最晚的自动消失时间。页最晚消失时间已经过页级衔接
+    约束（不晚于下一页演唱开始），因此共同退场不会制造跨页重叠。
+
+    例外：参与像素挤压的行保留其被压缩的退场时间——那是实测出的冲突，
+    共同退场不能把冲突再拉回来。``squeeze_pairs`` 为 ``None`` 时（纯时间
+    学调用）按无冲突处理。
+    """
+
+    squeezed: set[int] = set()
+    for other, line in squeeze_pairs or ():
+        squeezed.add(int(other))
+        squeezed.add(int(line))
+
+    for page in pages:
+        candidate_indices = [
+            index
+            for index in page.lines
+            if render_lines[index].display_end_override_ms is None
+        ]
+        if not candidate_indices:
+            continue
+        common_end = max(ends[index] for index in candidate_indices)
+        if common_end <= 0:
+            continue
+        for index in candidate_indices:
+            if index in squeezed:
+                continue
+            if ends[index] < common_end:
+                ends[index] = common_end
 
 
 def paragraph_last_line_flags(
