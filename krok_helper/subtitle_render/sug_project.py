@@ -128,7 +128,8 @@ def timing_track_from_sug_project(
                 track_line_index=len(lines),
                 reverse_playback=bool(
                     getattr(sentence, "reverse_playback", False)
-                ),
+                )
+                or _sentence_timestamps_monotonic_non_increasing(chars),
             )
         )
 
@@ -166,6 +167,27 @@ def _tag_int(tags: Mapping[str, Any], key: str) -> int:
         return int(tags.get(key) or 0)
     except (TypeError, ValueError):
         return 0
+
+
+def _sentence_timestamps_monotonic_non_increasing(chars: Sequence[Any]) -> bool:
+    """字符时间戳是否单调不增（倒放预览打轴的可靠特征）。
+
+    SUG 倒放预览打轴按 ``region_end - local`` 写入：行首字符 ts 最大、
+    逐字符递减（共享 ts 的连读字符相等）。正常正向打轴是严格递增的，
+    因此"非递增且存在严格下降"即可识别倒放段——即使 ``reverse_playback``
+    标记因保存/自动标记链路丢失，转换后仍能正确进入倒放渲染路径。
+    """
+    timestamps: list[int] = []
+    for ch in chars:
+        for ts in (getattr(ch, "timestamps", None) or []):
+            try:
+                timestamps.append(int(ts))
+            except (TypeError, ValueError):
+                continue
+    if len(timestamps) < 2:
+        return False
+    pairs = list(zip(timestamps, timestamps[1:]))
+    return all(a >= b for a, b in pairs) and any(a > b for a, b in pairs)
 
 
 def _custom_tag_lines(value: object) -> list[str]:

@@ -926,3 +926,35 @@ def test_sug_project_conversion_preserves_reverse_playback():
     assert [line.reverse_playback for line in track.lines] == [True, False]
     # 递减字符 ts 原样保留（SUG 倒放预览打轴输出）
     assert [c.start_ms for c in track.lines[0].chars[:3]] == [58_660, 58_660, 58_450]
+
+
+def test_sug_project_conversion_infers_reverse_from_decreasing_ts():
+    """reverse 标记丢失（旧 .sug / 自动标记未生效）时，按字符 ts 单调不增识别倒放行。"""
+    singer = Singer(
+        id="main",
+        name="主唱",
+        color="#ff0000",
+        is_default=True,
+        backend_number=1,
+    )
+    # 无 reverse_playback 标记，但字符 ts 递减（倒放预览打轴输出）
+    sentence = Sentence(singer_id=singer.id)
+    for text, ts in [("ず", 58_660), ("っ", 58_660), ("と", 58_450)]:
+        ch = Character(char=text, ruby=Ruby(parts=[RubyPart("")]), check_count=1)
+        ch.add_timestamp(ts)
+        sentence.characters.append(ch)
+    track = timing_track_from_sug_project(
+        Project(singers=[singer], sentences=[sentence])
+    )
+    assert track.lines[0].reverse_playback is True
+
+    # 正向递增打轴不受影响
+    forward = Sentence(singer_id=singer.id)
+    for text, ts in [("あ", 60_000), ("い", 60_500)]:
+        ch = Character(char=text, ruby=Ruby(parts=[RubyPart("")]), check_count=1)
+        ch.add_timestamp(ts)
+        forward.characters.append(ch)
+    track2 = timing_track_from_sug_project(
+        Project(singers=[singer], sentences=[forward])
+    )
+    assert track2.lines[0].reverse_playback is False
