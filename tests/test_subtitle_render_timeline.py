@@ -216,15 +216,15 @@ def test_compute_display_lines_matches_n3_top_long_two_lane_model():
         lane_gap_ms=300,
     )
 
-    # N3 TopLongAdjuster：上行挂到下一页上屏前 300ms；下行 = 自身演唱结束 + 1000。
-    # 段首页两行同时入场（BottomLineShowBeginTime → 上行的 ShowBeginTime），
-    # 之后每页下行 = 上一页下行消失 + IntervalTime。
+    # 页级时长衔接（page hugging）后，顺序演唱的相邻页首行不提前到上一页
+    # 显示窗口内、上一页尾行不拖进下一页演唱：上行 start 被裁到上一页结束/
+    # 自身演唱开始，下行 end 被裁到下一页演唱开始，避免跨页图层混合。
     assert [(item.lane, item.display_start_ms, item.display_end_ms) for item in layouts] == [
         (0, 53_690, 60_440),
-        (1, 53_690, 63_470),
-        (0, 60_740, 69_880),
-        (1, 63_770, 72_740),
-        (0, 70_180, 80_240),
+        (1, 53_690, 62_540),
+        (0, 62_540, 69_880),
+        (1, 63_770, 71_980),
+        (0, 71_980, 80_240),
         (1, 73_040, 80_240),
     ]
 
@@ -285,9 +285,9 @@ def test_compute_display_lines_never_cuts_before_own_sing_end():
     )
 
     assert [(item.display_start_ms, item.display_end_ms) for item in layouts] == [
-        (38_730, 44_840),  # 上行：下一页上屏 44_915 − IntervalTime 300 之前被挤压过
-        (38_730, 46_700),  # 下行：无 end_ms → 末字 +1000 当演唱结束，再 + PostTime
-        (44_915, 49_040),
+        (38_730, 44_840),  # 上行：下一页上屏 45_530 − IntervalTime 300 之前被挤压过
+        (38_730, 45_530),  # 下行：页级衔接把 tail 裁到下一页演唱开始（不拖进下一页）
+        (45_530, 49_040),
     ]
     assert layouts[0].display_end_ms >= line1.end_ms
 
@@ -327,7 +327,7 @@ def test_compute_display_lines_keeps_next_line_protected_lead_in():
     assert [(item.display_start_ms, item.display_end_ms) for item in layouts] == [
         (0, 8_700),
         (0, 10_700),
-        (9_000, 13_000),
+        (10_700, 13_000),
         (10_700, 13_000),
     ]
     # 第 2 页下行紧跟上一页下行消失（IntervalTime 已被挤压吃掉），但仍早于开唱。
@@ -575,12 +575,12 @@ def test_red_fraction_page_sync_does_not_extend_to_section_end():
     sync = compute_display_lines(track, sync_ending=True, **settings)
 
     assert [item.lane for item in nosync] == [0, 1, 0, 0]
-    assert [item.display_end_ms for item in nosync] == [66_865, 69_315, 73_065, 87_915]
-    # 前两行属于第一页，第三行是同 section 的下一页；页级同步不能跨页
-    # 把第二行延长到第三行结束。
+    assert [item.display_end_ms for item in nosync] == [66_865, 68_515, 73_065, 87_915]
+    # 前两行属于第一页，第三行是同 section 的下一页；页级衔接把第二行 tail
+    # 裁到下一页演唱开始，页级同步也不能跨页把第二行延长到第三行结束。
     assert [item.display_end_ms for item in sync] == [
-        69_315,
-        69_315,
+        68_515,
+        68_515,
         73_065,
         87_915,
     ]

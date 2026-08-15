@@ -303,6 +303,8 @@ def compute_display_lines(
 
     _apply_zero_length_jumps(starts, display_ends, pages, render_lines)
 
+    _apply_page_boundary_hugging(starts, display_ends, pages, render_lines)
+
     _apply_reverse_spans(pages, render_lines)
 
     _apply_page_lane_offsets(pages, lanes, show_times.force_bottom)
@@ -657,6 +659,111 @@ def _apply_zero_length_jumps(
             for line_index in pages[following].lines:
                 if render_lines[line_index].display_start_override_ms is None:
                     starts[line_index] = jump_ms
+
+
+def _apply_page_boundary_hugging(
+    starts: list[int],
+    ends: list[int],
+    pages: Sequence[ShowTimePage],
+    render_lines: Sequence[TimingLine],
+) -> None:
+    """页级时长衔接：相邻页显示窗口不重叠（旧页结束后新页才出现）。
+
+    连续歌词（尤其 0 长度跳变 / 闪回段）页间紧贴时，下一页首行的
+    lead-in 会提前到上一页显示窗口内，两页歌词同时在屏（图层混合 /
+    "提前出现预览"）。这里把**提前出现**的行显示开始裁到上一页显示
+    结束，但不晚于自身演唱开始（演唱内容绝不延迟）；逐行手动覆盖
+    优先。这是稳定显示的分段时长衔接，不受"行间重叠"设置影响。
+    """
+
+    # 每页演唱范围（char intervals 的并集）
+    page_sing: list[tuple[Optional[int], int]] = []
+    line_sing_end: dict[int, int] = {}
+    for page in pages:
+        sing_start: Optional[int] = None
+        sing_end = 0
+        for line_index in page.lines:
+            line = render_lines[line_index]
+            if line.is_blank or not line.chars:
+                continue
+            ss: Optional[int] = None
+            se = 0
+            for cs, ce in compute_char_intervals(line):
+                if ce > cs:
+                    ss = cs if ss is None else min(ss, cs)
+                    se = max(se, ce)
+            if ss is not None:
+                line_sing_end[line_index] = se
+                sing_start = ss if sing_start is None else min(sing_start, ss)
+                sing_end = max(sing_end, se)
+        page_sing.append((sing_start, sing_end))
+
+    prev_display_end = 0
+    for page_index, page in enumerate(pages):
+        page_lines = [index for index in page.lines]
+        if not page_lines:
+            continue
+        sing_start, sing_end = page_sing[page_index]
+        prev_sing_end = page_sing[page_index - 1][1] if page_index > 0 else 0
+        # 仅对**顺序演唱**（本页演唱不早于上一页演唱结束）的页衔接：
+        # 演唱重叠（合唱 / 不同位置同时唱）是有意的多行显示，绝不裁剪。
+        if sing_start is not None and sing_start >= prev_sing_end and prev_display_end > 0:
+            for line_index in page_lines:
+                if (
+                    render_lines[line_index].display_start_override_ms is None
+                    and starts[line_index] < prev_display_end
+                ):
+                    starts[line_index] = min(prev_display_end, sing_start)
+        page_display_end = max(ends[index] for index in page_lines)
+        # 本页尾行 tail 不侵入下一页演唱（顺序演唱时；不早于自身演唱结束）
+        if page_index + 1 < len(pages):
+            next_sing_start = page_sing[page_index + 1][0]
+            if (
+                next_sing_start is not None
+                and sing_end > 0
+                and next_sing_start >= sing_end
+            ):
+                for line_index in page_lines:
+                    if (
+                        render_lines[line_index].display_end_override_ms is None
+                        and ends[line_index] > next_sing_start
+                    ):
+                        own_sing_end = line_sing_end.get(line_index, 0)
+                        if own_sing_end > 0:
+                            ends[line_index] = max(
+                                own_sing_end,
+                                min(ends[line_index], next_sing_start),
+                            )
+                        else:
+                            ends[line_index] = min(ends[line_index], next_sing_start)
+                page_display_end = max(ends[index] for index in page_lines)
+        # 0 长度闪回行显示到本页显示结束：与同页行同屏（闪回可见），
+        # 但 start 已被页衔接裁到上一页结束，end 不越出本页 → 不混页。
+        # 目标只取**自然**页显示结束（排除逐行手动覆盖撑大的 end），
+        # 避免闪回行被别的行的手动时长拖到整段结束。
+        natural_page_end = 0
+        for line_index in page_lines:
+            line = render_lines[line_index]
+            if line.is_blank or not line.chars:
+                continue
+            if line.display_end_override_ms is not None:
+                continue
+            natural_page_end = max(natural_page_end, ends[line_index])
+        if natural_page_end > 0:
+            for line_index in page_lines:
+                line = render_lines[line_index]
+                if (
+                    line.is_blank
+                    or not line.chars
+                    or line.display_end_override_ms is not None
+                ):
+                    continue
+                zero_length = all(
+                    ce <= cs for cs, ce in compute_char_intervals(line)
+                )
+                if zero_length and ends[line_index] < natural_page_end:
+                    ends[line_index] = natural_page_end
+        prev_display_end = max(prev_display_end, page_display_end)
 
 
 def paragraph_last_line_flags(
