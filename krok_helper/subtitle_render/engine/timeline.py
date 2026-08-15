@@ -307,6 +307,8 @@ def compute_display_lines(
 
     _apply_short_gap_exit_priority(starts, display_ends, pages, render_lines)
 
+    _apply_long_gap_blank(starts, display_ends, pages, render_lines)
+
     _apply_page_common_exit(
         starts, display_ends, pages, render_lines, squeeze_pairs
     )
@@ -884,6 +886,44 @@ def _apply_short_gap_exit_priority(
                 and ends[prev_index] < target
             ):
                 ends[prev_index] = target
+
+
+def _apply_long_gap_blank(
+    starts: list[int],
+    ends: list[int],
+    pages: Sequence[ShowTimePage],
+    render_lines: Sequence[TimingLine],
+) -> None:
+    """长间隔留白：前后页演唱间隔 > 1000ms 时不再强制首尾相接。
+
+    页级衔接默认会把下一页的入场裁到上一页显示结束，使页窗口首尾相接；
+    但间隔已经超过 1000ms 时，衔接会让下一页提前很久出现（抢占间隔）。
+    这里改为：下一页从自身演唱开始时间入场（不提前），上一页保持自然退场，
+    从而在页间留出空白。全 0 长度闪回行与倒放行不参与。
+    """
+
+    for page_index in range(1, len(pages)):
+        prev_page = pages[page_index - 1]
+        page = pages[page_index]
+        if not prev_page.lines or not page.lines:
+            continue
+        prev = render_lines[prev_page.lines[-1]]
+        nxt = render_lines[page.lines[0]]
+        if prev.reverse_playback or nxt.reverse_playback:
+            continue
+        next_start = _line_effective_start_ms(nxt)
+        prev_end = _line_effective_end_ms(prev)
+        if next_start - prev_end <= 1000:
+            continue
+        if not any(ce > cs for cs, ce in compute_char_intervals(nxt)):
+            continue
+        target = next_start
+        for index in page.lines:
+            if (
+                render_lines[index].display_start_override_ms is None
+                and starts[index] < target
+            ):
+                starts[index] = target
 
 
 def paragraph_last_line_flags(

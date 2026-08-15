@@ -583,11 +583,13 @@ def test_sync_entry_groups_each_page_instead_of_the_whole_section():
         independent_line_entry=True,
     )
 
+    # 两页演唱间隔 7000ms > 1000ms：长间隔留白，下一页从自身演唱开始
+    # 20_000 入场（页内同步入场让下行也到 20_000），不再拉到上一页结束。
     assert [item.display_start_ms for item in sync] == [
         8_200,
         8_200,
-        18_200,
-        18_200,
+        20_000,
+        20_000,
     ]
 
 

@@ -10112,12 +10112,14 @@ def test_page_ts_sync_ending_uses_colliding_next_line_as_read_only_bound(qapp):
 
     assert synchronized[2] == baseline[2]
     assert synchronized[3] == baseline[3]
-    # 页级衔接 + 页内共同退场让第一页两行都结束在下一页演唱开始 12_500；
-    # 同步出场没有额外空间可延，也不会侵入下一页，因此与 baseline 一致。
+    # 页级衔接 + 页内共同退场让第一页两行都结束在 12_500；两页演唱间隔
+    # 2500ms > 1000ms，长间隔留白让下一页从自身演唱开始 14_000 入场，
+    # 同步出场不会侵入这段空白，因此与 baseline 一致。
     assert baseline[0][1] == 12_500
     assert synchronized[0][1] == 12_500
     assert synchronized[1][1] == baseline[1][1]
-    assert synchronized[0][1] == baseline[2][0]
+    assert baseline[2][0] == 14_000
+    assert synchronized[0][1] < baseline[2][0]
 
 
 def test_page_sync_boundary_scans_past_non_colliding_intermediate_page():
