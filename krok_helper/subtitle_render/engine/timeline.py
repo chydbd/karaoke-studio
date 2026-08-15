@@ -305,6 +305,8 @@ def compute_display_lines(
 
     _apply_page_boundary_hugging(starts, display_ends, pages, render_lines)
 
+    _apply_short_gap_exit_priority(starts, display_ends, pages, render_lines)
+
     _apply_page_common_exit(
         starts, display_ends, pages, render_lines, squeeze_pairs
     )
@@ -810,6 +812,78 @@ def _apply_page_common_exit(
                 continue
             if ends[index] < common_end:
                 ends[index] = common_end
+
+
+def _apply_short_gap_exit_priority(
+    starts: list[int],
+    ends: list[int],
+    pages: Sequence[ShowTimePage],
+    render_lines: Sequence[TimingLine],
+) -> None:
+    """短间隔退场优先：前后两句演唱间隔 < 150ms 时，间隔全部用于退场。
+
+    下一句不再提前入场（取消 lead-in），上一句至少显示到下一句演唱开始。
+    全 0 长度的闪回行没有 lead-in 概念，仍按页级衔接的窗口显示，否则会被
+    压成零时长；倒放行保持其镜像语义，不参与本规则。先处理页间边界再处理
+    页内相邻行，随后由共同退场把同页行尾拉齐。
+    """
+
+    def _eligible_short_gap(prev: TimingLine, nxt: TimingLine) -> Optional[int]:
+        if prev.reverse_playback or nxt.reverse_playback:
+            return None
+        next_start = _line_effective_start_ms(nxt)
+        prev_end = _line_effective_end_ms(prev)
+        if next_start <= prev_end:
+            return None
+        if next_start - prev_end >= 150:
+            return None
+        if not any(ce > cs for cs, ce in compute_char_intervals(nxt)):
+            return None
+        return next_start
+
+    # 页间：下一页所有行都不得早于下一页首句的演唱开始，上一页所有行都
+    # 至少显示到该时刻，保证页窗口仍然首尾相接。
+    for page_index in range(1, len(pages)):
+        prev_page = pages[page_index - 1]
+        page = pages[page_index]
+        if not prev_page.lines or not page.lines:
+            continue
+        target = _eligible_short_gap(
+            render_lines[prev_page.lines[-1]], render_lines[page.lines[0]]
+        )
+        if target is None:
+            continue
+        for index in page.lines:
+            if (
+                render_lines[index].display_start_override_ms is None
+                and starts[index] < target
+            ):
+                starts[index] = target
+        for index in prev_page.lines:
+            if (
+                render_lines[index].display_end_override_ms is None
+                and ends[index] < target
+            ):
+                ends[index] = target
+
+    # 页内：下一句同样取消 lead-in，上一句延到下一句演唱开始。
+    for page in pages:
+        for prev_index, next_index in zip(page.lines, page.lines[1:]):
+            target = _eligible_short_gap(
+                render_lines[prev_index], render_lines[next_index]
+            )
+            if target is None:
+                continue
+            if (
+                render_lines[next_index].display_start_override_ms is None
+                and starts[next_index] < target
+            ):
+                starts[next_index] = target
+            if (
+                render_lines[prev_index].display_end_override_ms is None
+                and ends[prev_index] < target
+            ):
+                ends[prev_index] = target
 
 
 def paragraph_last_line_flags(

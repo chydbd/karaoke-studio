@@ -326,12 +326,14 @@ def test_compute_display_lines_keeps_next_line_protected_lead_in():
     )
 
     assert [(item.display_start_ms, item.display_end_ms) for item in layouts] == [
-        (0, 10_700),
-        (0, 10_700),
-        (10_700, 13_000),
-        (10_700, 13_000),
+        (0, 10_800),
+        (0, 10_800),
+        (10_800, 13_000),
+        (10_800, 13_000),
     ]
-    # 第 2 页下行紧跟上一页下行消失（IntervalTime 已被挤压吃掉），但仍早于开唱。
+    # 两页演唱间隔 100ms < 150ms：间隔全部用于上一页退场，下一页取消 lead-in，
+    # 从 10_800 开始；下行仍不晚于自身开唱 11_000。
+    assert layouts[2].display_start_ms == line3.chars[0].start_ms
     assert layouts[3].display_start_ms <= line4.chars[0].start_ms
 
 
@@ -361,6 +363,32 @@ def test_compute_display_lines_common_exit_keeps_page_lines_together():
     assert layouts[0].display_end_ms == layouts[1].display_end_ms == layouts[2].display_start_ms
     assert layouts[0].display_end_ms >= line1.end_ms
     assert layouts[1].display_end_ms >= line2.end_ms
+
+
+def test_compute_display_lines_short_gap_uses_exit_not_entry():
+    # 前后页演唱间隔 100ms < 150ms：间隔全部给上一页退场，下一页首句
+    # 取消 lead-in、从自身演唱开始入场。
+    line1 = _make_line([("a", 10_000)], end_ms=11_000)
+    line2 = _make_line([("b", 12_000)], end_ms=13_000)
+    line3 = _make_line([("c", 13_100)], end_ms=14_000)
+    line4 = _make_line([("d", 15_000)], end_ms=16_000)
+    track = _track(line1, line2, line3, line4)
+
+    layouts = compute_display_lines(
+        track,
+        lead_in_ms=1800,
+        tail_ms=1000,
+        lane_gap_ms=300,
+    )
+
+    assert [(item.lane, item.display_start_ms, item.display_end_ms) for item in layouts] == [
+        (0, 8_200, 13_100),
+        (1, 8_200, 13_100),
+        (0, 13_100, 17_000),
+        (1, 13_575, 17_000),
+    ]
+    assert layouts[2].display_start_ms == line3.chars[0].start_ms
+    assert layouts[1].display_end_ms == line3.chars[0].start_ms
 
 
 def test_compute_display_lines_has_no_max_hold_cap():
