@@ -212,10 +212,9 @@ class TimingLine:
     reverse_span_ms: Optional[tuple[int, int]] = None
     """倒放段的镜像区间 ``(start_ms, end_ms)``。
 
-    连续的反转行组成一个倒放块，块内所有行共享同一镜像区间（块的
-    起始 = 块内最早演唱起点，结束 = 块内最晚演唱终点），使回退按整段
-    短语的逆时间序进行（先退末尾、后退开头）。``reverse_playback`` 为
-    False 时恒为 None。
+    由渲染时 ``_apply_reverse_spans`` 按行写入：每行取自身演唱区间
+    ``(行首字符起点, 行尾)``，保证回退在该行自己的显示窗口内可见。
+    ``reverse_playback`` 为 False 时恒为 None。
     """
     display_start_override_ms: Optional[int] = None
     """本行「上屏时刻」手动覆盖（毫秒）。None = 按全局提前入场自动计算。

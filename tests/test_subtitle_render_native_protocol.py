@@ -613,6 +613,20 @@ def test_gpu_capability_gate_rejects_only_unimplemented_whole_scene_features():
         ]
     )
     assert gpu_unsupported_features(span_track, Style()) == ()
+    reverse_track = TimingTrack(
+        lines=[
+            TimingLine(
+                chars=[TimingChar("A", 0)],
+                end_ms=500,
+                reverse_playback=True,
+            )
+        ]
+    )
+    # 倒放段：GPU sidecar 尚未实现镜像填充，必须整帧回退 CPU Painter。
+    assert gpu_unsupported_features(reverse_track, Style()) == ("reverse_playback",)
+    assert gpu_unsupported_feature_labels(("reverse_playback",)) == (
+        "倒放段（[@reverse]）暂未支持 GPU",
+    )
     span_line = build_render_ir(
         span_track,
         Style(font_family="Times New Roman", font_family_latin="Times New Roman"),

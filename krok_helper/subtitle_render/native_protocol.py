@@ -32,6 +32,7 @@ GPU_UNSUPPORTED_FEATURE_LABELS = {
     "karaoke_animation": "\u672a\u77e5\u8d70\u5b57\u7279\u6548",
     "line_animation_override": "\u672a\u77e5\u9010\u884c\u7279\u6548",
     "bitmap_guide_symbol": "\u56fe\u7247\u5bfc\u5531\u7b26 / N3 Emoji \u5934\u50cf",
+    "reverse_playback": "\u5012\u653e\u6bb5\uff08[@reverse]\uff09\u66ab\u672a\u652f\u6301 GPU",
 }
 
 
@@ -108,6 +109,11 @@ def gpu_unsupported_features(
                     "utopia",
                 }:
                     reasons.append("line_animation_override")
+    for source in sources:
+        for line in source.lines:
+            if line.reverse_playback:
+                reasons.append("reverse_playback")
+                break
     return tuple(dict.fromkeys(reasons))
 
 

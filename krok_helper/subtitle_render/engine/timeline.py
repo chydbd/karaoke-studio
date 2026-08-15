@@ -903,8 +903,8 @@ def reverse_fill_time_ms(line: TimingLine, t_ms: int) -> int:
     倒放段的音频是反向播放的，但歌词仍是实际文字、时间戳按正常顺序递增。
     进度条按镜像时间 ``t' = span_start + span_end - t`` 计算——段起始处
     已唱满、随时间推移高亮边界从后往前回退（已唱部分像倒带一样退回去），
-    音频本身不变。镜像区间取倒放块的 ``reverse_span_ms``（块内所有行共享，
-    回退按整段短语的逆时间序进行）；手工构造的行退化为行自身区间。
+    音频本身不变。镜像区间取 ``line.reverse_span_ms``（渲染时按行写入，
+    即行自身演唱区间）；手工构造的行退化为行自身区间。
     非倒放行原样返回 ``t_ms``。
     """
     if not line.reverse_playback:
