@@ -955,11 +955,12 @@ def test_reverse_decreasing_char_intervals_mirror_ts():
 
 
 def test_reverse_decreasing_char_intervals_shared_ts():
-    """共享 ts 的连读字符共用同一区间（同时退空）。"""
+    """共享 ts 的连读字符（如「ずっ」）组内均分子区间，依次退空而非一起跳变。"""
     line = _rev_dec_line([("一", 9_540), ("っ", 9_540), ("回", 9_360)])
     intervals = compute_char_intervals(line)
-    assert intervals[0] == intervals[1]
-    assert intervals[1] == (8_860, 9_360)
+    # 组（一っ，mirror 9360，组 [8860, 9360]）均分：一 [8860, 9110]，っ [9110, 9360]
+    assert intervals[0] == (8_860, 9_110)
+    assert intervals[1] == (9_110, 9_360)
     assert intervals[2] == (9_360, 9_540)
 
 

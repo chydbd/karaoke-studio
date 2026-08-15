@@ -814,25 +814,33 @@ def compute_char_intervals(
     n = len(chars)
     if n == 0:
         return []
-    # 递减字符时间戳的倒放行（SUG 倒放预览输出）：内容按字符 ts 降序播放，
     # 递减字符时间戳的倒放行（SUG 倒放预览输出）：镜像时间轴上的连续退空锋面。
     # 字符 ts 递减 = 左端 ts 最大、右端 ts 最小；最终视频先听到右端内容。
     # 区间按**镜像 ts**（hi + lo - ts）分配：右端字符区间最大 → 行级镜像填充
     # 时间扫过时右端先退空、锋面逐字向左推进（整句连续变空，从右到左）。
-    # 共享 ts 的字符（连读）共用同一区间，同时退空。
+    # 共享 ts 的连读字符（如「ずっ」）在组区间内按文件序均分子区间，
+    # 依次退空（组内同样从右到左），避免整组一起跳变。
     if _reverse_decreasing(line):
         starts = [int(c.start_ms) for c in chars]
         lo, hi = min(starts), max(starts)
         mirrored = [hi + lo - s for s in starts]
         result: list[tuple[int, int]] = []
         prev_m = None
-        for m in mirrored:
-            if m == prev_m:
-                result.append(result[-1])
-                continue
-            start = prev_m if prev_m is not None else m - 500
-            result.append((start, m))
+        i = 0
+        while i < len(chars):
+            m = mirrored[i]
+            j = i
+            while j < len(chars) and mirrored[j] == m:
+                j += 1
+            group_start = prev_m if prev_m is not None else m - 500
+            span = m - group_start
+            count = j - i
+            for k in range(count):
+                seg_lo = group_start + span * k // count
+                seg_hi = group_start + span * (k + 1) // count
+                result.append((seg_lo, seg_hi))
             prev_m = m
+            i = j
         return result
     result: list[tuple[int, int]] = []
     for i, ch in enumerate(chars):
