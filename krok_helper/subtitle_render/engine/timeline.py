@@ -815,17 +815,24 @@ def compute_char_intervals(
     if n == 0:
         return []
     # 递减字符时间戳的倒放行（SUG 倒放预览输出）：内容按字符 ts 降序播放，
-    # 字 i 的演唱区间 = [ts_i, ts_{i-1}]（左小右大），首字用兜底时长。
+    # 递减字符时间戳的倒放行（SUG 倒放预览输出）：镜像时间轴上的连续退空锋面。
+    # 字符 ts 递减 = 左端 ts 最大、右端 ts 最小；最终视频先听到右端内容。
+    # 区间按**镜像 ts**（hi + lo - ts）分配：右端字符区间最大 → 行级镜像填充
+    # 时间扫过时右端先退空、锋面逐字向左推进（整句连续变空，从右到左）。
+    # 共享 ts 的字符（连读）共用同一区间，同时退空。
     if _reverse_decreasing(line):
+        starts = [int(c.start_ms) for c in chars]
+        lo, hi = min(starts), max(starts)
+        mirrored = [hi + lo - s for s in starts]
         result: list[tuple[int, int]] = []
-        for i, ch in enumerate(chars):
-            if i > 0:
-                end = chars[i - 1].start_ms
-            else:
-                end = ch.start_ms + 500
-            if end < ch.start_ms:
-                end = ch.start_ms
-            result.append((ch.start_ms, end))
+        prev_m = None
+        for m in mirrored:
+            if m == prev_m:
+                result.append(result[-1])
+                continue
+            start = prev_m if prev_m is not None else m - 500
+            result.append((start, m))
+            prev_m = m
         return result
     result: list[tuple[int, int]] = []
     for i, ch in enumerate(chars):
@@ -911,7 +918,7 @@ def char_fill_ratio(char_start_ms: int, char_end_ms: int, t_ms: int) -> float:
 
 
 def reverse_fill_time_ms(line: TimingLine, t_ms: int) -> int:
-    """倒放段（``line.reverse_playback``）的填充时间。
+    """倒放段（``line.reverse_playback``）的镜像填充时间。
 
     倒放段的音频是反向播放的，但歌词仍是实际文字、时间戳按正常顺序递增。
     进度条按镜像时间 ``t' = span_start + span_end - t`` 计算——段起始处
@@ -919,25 +926,17 @@ def reverse_fill_time_ms(line: TimingLine, t_ms: int) -> int:
     音频本身不变。镜像区间取 ``line.reverse_span_ms``（渲染时按行写入，
     即行自身演唱区间）；手工构造的行退化为行自身区间。
 
-    携带**递减字符时间戳**的倒放行（SUG 倒放预览打轴输出）不走镜像：
-    它的字符演唱区间本身已按"听到序"反转（``[ts_i, ts_{i-1}]``），内容在
-    行窗口内正向播放，填充时间原样返回 ``t_ms``。
+    携带**递减字符时间戳**的倒放行（SUG 倒放预览打轴输出）同样走镜像：
+    它的字符演唱区间已按"听到序"反转（``[ts_i, ts_{i-1}]``），镜像时间配合
+    反转区间得到"行出现已唱满、从右向左退空"的倒放视觉。
     非倒放行原样返回 ``t_ms``。
     """
     if not line.reverse_playback:
         return t_ms
-    if _reverse_decreasing(line):
-        return t_ms
     if line.reverse_span_ms is not None:
         start, end = line.reverse_span_ms
     else:
-        start = timing_line_start_ms(line)
-        if line.end_ms is not None:
-            end = line.end_ms
-        elif line.chars:
-            end = line.chars[-1].start_ms + 1000
-        else:
-            return t_ms
+        start, end = _reverse_line_window(line)
     if end <= start:
         return t_ms
     return start + end - t_ms
@@ -981,12 +980,14 @@ def _reverse_line_window(line: TimingLine) -> tuple[int, int]:
     """倒放行的有效演唱窗口（左小右大）。
 
     - 递减字符 ts（SUG 输出）：内容按字符 ts 降序播放——末字符（ts 最小）
-      最早发声，首字符（ts 最大）最后发声。窗口 = ``(末字符 ts, 首字符 ts)``。
+      最早发声，首字符（ts 最大）最后发声。窗口 = ``(末字符 ts, 首字符 ts
+      + 行尾停留)``：行出现在末字符时刻，镜像填充使行出现即已唱满，随
+      时间高亮锋面从右向左退空。
     - 其他：沿用 ``(行首, 行尾)``。
     """
     if _reverse_decreasing(line):
         starts = [int(c.start_ms) for c in line.chars]
-        return min(starts), max(starts)
+        return min(starts), max(starts) + 500
     return timing_line_start_ms(line), _line_end_ms(line)
 
 

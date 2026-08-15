@@ -934,26 +934,37 @@ def _rev_dec_line(specs, end_ms=None):
     return line
 
 
-def test_reverse_decreasing_keeps_forward_fill():
-    """递减字符时间戳的倒放行不走镜像：内容在窗口内正向播放。"""
+def test_reverse_decreasing_keeps_mirror_fill():
+    """递减字符时间戳的倒放行同样走镜像：行出现已唱满、高亮锋面从右向左退空。"""
     line = _rev_dec_line([("一", 9_540), ("回", 9_360), ("回", 9_180)])
-    assert reverse_fill_time_ms(line, 9_540) == 9_540
-    assert reverse_fill_time_ms(line, 9_300) == 9_300
-    assert reverse_fill_time_ms(line, 9_180) == 9_180
+    # 窗口 (9180, 10040)：行出现（t=9180）→ fill 10040（满）
+    assert reverse_fill_time_ms(line, 9_180) == 10_040
+    assert reverse_fill_time_ms(line, 9_360) == 9_860
+    assert reverse_fill_time_ms(line, 10_040) == 9_180
 
 
-def test_reverse_decreasing_char_intervals_reversed():
-    """递减字符区间反转：字 i 区间 = [ts_i, ts_{i-1}]，首字用兜底时长。"""
+def test_reverse_decreasing_char_intervals_mirror_ts():
+    """递减字符区间按镜像 ts 分配：右端字符区间最大 → 回退锋面从右到左。"""
     line = _rev_dec_line([("一", 9_540), ("回", 9_360), ("回", 9_180)])
+    # mirror = [9180, 9360, 9540]：字 1 [9180-500, 9180]，字 2 [9180, 9360]，字 3 [9360, 9540]
     assert compute_char_intervals(line) == [
-        (9_540, 10_040),
-        (9_360, 9_540),
+        (8_680, 9_180),
         (9_180, 9_360),
+        (9_360, 9_540),
     ]
 
 
+def test_reverse_decreasing_char_intervals_shared_ts():
+    """共享 ts 的连读字符共用同一区间（同时退空）。"""
+    line = _rev_dec_line([("一", 9_540), ("っ", 9_540), ("回", 9_360)])
+    intervals = compute_char_intervals(line)
+    assert intervals[0] == intervals[1]
+    assert intervals[1] == (8_860, 9_360)
+    assert intervals[2] == (9_360, 9_540)
+
+
 def test_reverse_decreasing_display_window_valid():
-    """递减行显示窗口不退化：内容区间 [末字符 ts, 首字符 ts] 完整可见。"""
+    """递减行显示窗口不退化：内容区间 [末字符 ts, 首字符 ts + 行尾停留] 完整可见。"""
     line1 = _rev_dec_line([("一", 9_540), ("回", 9_360)], end_ms=8_100)
     track = _track(line1)
     result = compute_display_lines(
@@ -966,11 +977,11 @@ def test_reverse_decreasing_display_window_valid():
     dl = result[0]
     assert dl.display_start_ms <= dl.display_end_ms
     assert dl.display_start_ms == 9_360  # 末字符 ts（内容最早播放）
-    assert dl.display_end_ms == 9_540    # 首字符 ts
+    assert dl.display_end_ms == 10_040  # 首字符 ts + 行尾停留 500
 
 
 def test_reverse_decreasing_assigns_window_span():
-    """递减行 reverse_span 用有效窗口（末字符 ts, 首字符 ts）。"""
+    """递减行 reverse_span 用有效窗口（末字符 ts, 首字符 ts + 行尾停留）。"""
     line1 = _rev_dec_line([("一", 9_540), ("回", 9_360)], end_ms=8_100)
     track = _track(line1)
     compute_display_lines(
@@ -980,7 +991,7 @@ def test_reverse_decreasing_assigns_window_span():
         lane_gap_ms=0,
         lane_count=2,
     )
-    assert line1.reverse_span_ms == (9_360, 9_540)
+    assert line1.reverse_span_ms == (9_360, 10_040)
 
 
 def test_reverse_increasing_still_mirrors():
