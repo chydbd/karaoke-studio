@@ -4919,22 +4919,22 @@ def display_windows_for_style(
             if index is not None:
                 windows[index] = (item.display_start_ms, item.display_end_ms)
         return windows
-    lead = max(style.line_lead_in_ms, 0)
-    tail = max(style.line_tail_ms, 0)
-    for index, line in enumerate(track.lines):
-        if line.is_blank or not line.chars:
-            continue
-        if _reverse_decreasing(line):
-            # 递减倒放行：原始行首 ts（最大）> line.end_ms（下一行首 ts），
-            # 窗口会倒置/为空；用有效窗口（末字符 ts, 首字符 ts + 行尾停留）
-            start, end = _reverse_line_window(line)
-            display_start = max(start - lead, 0)
-            display_end = end + tail
-            windows[index] = apply_display_overrides(line, display_start, display_end)
-            continue
-        display_start = max(_line_start_ms(line) - lead, 0)
-        display_end = _line_end_ms(line) + tail
-        windows[index] = apply_display_overrides(line, display_start, display_end)
+    # 单行模式：与双行共用同一套窗口语义（含 0 长度跳变紧贴、倒放行有效
+    # 窗口），经 _display_lines_for_style 走整轨缓存。旧公式逐行独立
+    # lead/tail 扩展会让跳变处相邻行窗口大幅重叠，渲染/预览出现图层重叠。
+    items = _display_lines_for_style(
+        track,
+        style,
+        logical_w=logical_w,
+        logical_h=logical_h,
+    )
+    index_of = {id(line): i for i, line in enumerate(track.lines)}
+    for item in items:
+        index = index_of.get(id(item.line))
+        if index is not None:
+            windows[index] = apply_display_overrides(
+                item.line, item.display_start_ms, item.display_end_ms
+            )
     return windows
 
 
@@ -5186,18 +5186,16 @@ def _single_visible_display_line(
 ) -> DisplayLine | None:
     best_live: DisplayLine | None = None
     best_lead_or_tail: DisplayLine | None = None
-    lead = max(style.line_lead_in_ms, 0)
-    tail = max(style.line_tail_ms, 0)
-    for line in track.lines:
+    # 窗口与 display_windows_for_style 同一套语义（含 0 长度跳变紧贴、
+    # 倒放行有效窗口），避免跳变处提前上屏/滞后下屏造成的图层重叠。
+    windows = display_windows_for_style(track, style)
+    for index, line in enumerate(track.lines):
         if line.is_blank or not line.chars:
             continue
         sing_start = _line_start_ms(line)
         sing_end = _line_end_ms(line)
-        display_start = max(sing_start - lead, 0)
-        display_end = sing_end + tail
-        display_start, display_end = apply_display_overrides(
-            line, display_start, display_end
-        )
+        ws, we = windows.get(index, (sing_start, sing_end))
+        display_start, display_end = apply_display_overrides(line, ws, we)
         display_line = DisplayLine(
             line=line,
             lane=0,

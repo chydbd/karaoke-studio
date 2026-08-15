@@ -1025,3 +1025,32 @@ def test_display_windows_for_style_reverse_decreasing():
     assert start <= end
     assert start == max(9_360 - lead, 0)
     assert end == 10_040 + tail
+
+
+def test_display_windows_single_line_no_overlap_on_zero_length_jump():
+    """单行模式 0 长度跳变处窗口紧贴：不因 lead-in/tail 提前上屏/滞后下屏重叠。"""
+    from krok_helper.subtitle_render.engine.painter import display_windows_for_style
+    from krok_helper.subtitle_render.models import Style, TimingLine
+
+    def mk(specs, end_ms):
+        return TimingLine(chars=[TimingChar(t, s) for t, s in specs], end_ms=end_ms)
+
+    track = _track(
+        mk([("a", 1_000), ("b", 1_200)], 1_500),
+        TimingLine(is_blank=True),
+        mk([("c", 2_000)], 2_000),  # 0 长度（跳变）
+        mk([("d", 2_000), ("e", 2_300)], 2_400),
+        TimingLine(is_blank=True),
+        mk([("f", 2_600)], 2_600),  # 0 长度（跳变）
+        mk([("g", 2_600), ("h", 2_900)], 3_000),
+    )
+    windows = display_windows_for_style(track, Style(dual_line_layout=False))
+    prev_end = None
+    for index, line in enumerate(track.lines):
+        if not line.chars or index not in windows:
+            continue
+        ws, we = windows[index]
+        assert ws <= we
+        if prev_end is not None:
+            assert prev_end <= ws, f"line {index} overlaps previous: {prev_end} > {ws}"
+        prev_end = we
