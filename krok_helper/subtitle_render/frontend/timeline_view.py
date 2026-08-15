@@ -28,7 +28,10 @@ from PyQt6.QtWidgets import (
 from qfluentwidgets import BodyLabel, CardWidget, LineEdit, PrimaryPushButton
 
 from krok_helper.qfluent_compat import hide_fluent_tooltip, show_fluent_tooltip
-from krok_helper.subtitle_render.engine.timeline import compute_char_intervals
+from krok_helper.subtitle_render.engine.timeline import (
+    _reverse_decreasing,
+    compute_char_intervals,
+)
 from krok_helper.subtitle_render.frontend.theme import palette, themed
 from krok_helper.subtitle_render.models import (
     RubyAnnotation,
@@ -208,6 +211,24 @@ def _line_block(
 ) -> Optional[LineBlock]:
     if line.is_blank or not line.chars:
         return None
+    if _reverse_decreasing(line):
+        # 递减字符时间戳的倒放行（SUG 倒放预览输出）：块窗口 = 渲染有效窗口
+        # （末字符 ts, 首字符 ts + 行尾停留），字符格用镜像区间——否则行首 ts
+        # 大于 line.end_ms，时间轴块时长倒置/退化。
+        starts = [int(c.start_ms) for c in line.chars]
+        cells = [
+            CharCell(ch.text, start_ms, end_ms)
+            for ch, (start_ms, end_ms) in zip(line.chars, compute_char_intervals(line))
+        ]
+        return LineBlock(
+            line_index=line_index,
+            start_ms=min(starts),
+            end_ms=max(starts) + _FALLBACK_CHAR_MS,
+            singer_id=line.singer_id,
+            singer_label=line.singer_label,
+            text="".join(ch.text for ch in line.chars),
+            cells=tuple(cells),
+        )
     end_ms = (
         line.end_ms
         if line.end_ms is not None

@@ -1001,3 +1001,11 @@ def test_reverse_increasing_still_mirrors():
     assert reverse_fill_time_ms(line, 1_000) == 2_000
     assert reverse_fill_time_ms(line, 1_500) == 1_500
     assert reverse_fill_time_ms(line, 2_000) == 1_000
+
+
+def test_track_duration_uses_reverse_effective_window():
+    """导出时长包含递减倒放行完整窗口，不被原始 line.end_ms（下一行首 ts）截断。"""
+    line1 = _rev_dec_line([("一", 9_540), ("回", 9_360)], end_ms=8_100)
+    track = _track(line1)
+    # 未修前会取 line.end_ms=8100 或末字+1000=10360；有效窗口 end = 9540+500
+    assert track_duration_ms(track) == 10_040

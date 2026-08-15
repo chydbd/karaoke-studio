@@ -554,11 +554,15 @@ def _compute_section_ends(
     section_ids: list[int],
     tail: int,
 ) -> dict[int, int]:
-    """每段落的统一结束点 = 段内最晚演唱结束 + tail。"""
+    """每段落的统一结束点 = 段内最晚演唱结束 + tail。
+
+    递减倒放行用有效窗口 end（原始 ``line.end_ms`` 是下一行首字符 ts，
+    会提前结束段并截断倒放段字幕）。
+    """
     ends: dict[int, int] = {}
     for index, line in enumerate(render_lines):
         sid = section_ids[index]
-        end = _line_end_ms(line) + tail
+        end = _line_effective_end_ms(line) + tail
         ends[sid] = max(ends.get(sid, end), end)
     return ends
 
@@ -951,12 +955,16 @@ def reverse_fill_time_ms(line: TimingLine, t_ms: int) -> int:
 
 
 def track_duration_ms(track: TimingTrack) -> int:
-    """估算字幕轨整体时长（毫秒），用于时间轴 / 滑块上限。"""
+    """估算字幕轨整体时长（毫秒），用于时间轴 / 滑块上限。
+
+    递减倒放行的原始 ``line.end_ms`` 是下一行首字符 ts（更小），必须用
+    有效窗口（末字符 ts, 首字符 ts + 行尾停留），否则导出时长被截断。
+    """
     best = 0
     for line in track.lines:
         if line.is_blank or not line.chars:
             continue
-        end = _line_end_ms(line)
+        end = _line_effective_end_ms(line)
         if end > best:
             best = end
     return best
