@@ -920,3 +920,72 @@ def test_display_lines_span_skips_non_reversed_page():
     )
     assert line1.reverse_span_ms is None
     assert line2.reverse_span_ms is None
+
+
+# ---------------------------------------------------------------------------
+# 倒放段递减字符时间戳（SUG 倒放预览打轴输出）
+# ---------------------------------------------------------------------------
+
+
+def _rev_dec_line(specs, end_ms=None):
+    """递减字符时间戳的倒放行（首字符 ts 最大、末字符 ts 最小）。"""
+    line = _make_line(specs, end_ms=end_ms)
+    line.reverse_playback = True
+    return line
+
+
+def test_reverse_decreasing_keeps_forward_fill():
+    """递减字符时间戳的倒放行不走镜像：内容在窗口内正向播放。"""
+    line = _rev_dec_line([("一", 9_540), ("回", 9_360), ("回", 9_180)])
+    assert reverse_fill_time_ms(line, 9_540) == 9_540
+    assert reverse_fill_time_ms(line, 9_300) == 9_300
+    assert reverse_fill_time_ms(line, 9_180) == 9_180
+
+
+def test_reverse_decreasing_char_intervals_reversed():
+    """递减字符区间反转：字 i 区间 = [ts_i, ts_{i-1}]，首字用兜底时长。"""
+    line = _rev_dec_line([("一", 9_540), ("回", 9_360), ("回", 9_180)])
+    assert compute_char_intervals(line) == [
+        (9_540, 10_040),
+        (9_360, 9_540),
+        (9_180, 9_360),
+    ]
+
+
+def test_reverse_decreasing_display_window_valid():
+    """递减行显示窗口不退化：内容区间 [末字符 ts, 首字符 ts] 完整可见。"""
+    line1 = _rev_dec_line([("一", 9_540), ("回", 9_360)], end_ms=8_100)
+    track = _track(line1)
+    result = compute_display_lines(
+        track,
+        lead_in_ms=0,
+        tail_ms=0,
+        lane_gap_ms=0,
+        lane_count=2,
+    )
+    dl = result[0]
+    assert dl.display_start_ms <= dl.display_end_ms
+    assert dl.display_start_ms == 9_360  # 末字符 ts（内容最早播放）
+    assert dl.display_end_ms == 9_540    # 首字符 ts
+
+
+def test_reverse_decreasing_assigns_window_span():
+    """递减行 reverse_span 用有效窗口（末字符 ts, 首字符 ts）。"""
+    line1 = _rev_dec_line([("一", 9_540), ("回", 9_360)], end_ms=8_100)
+    track = _track(line1)
+    compute_display_lines(
+        track,
+        lead_in_ms=0,
+        tail_ms=0,
+        lane_gap_ms=0,
+        lane_count=2,
+    )
+    assert line1.reverse_span_ms == (9_360, 9_540)
+
+
+def test_reverse_increasing_still_mirrors():
+    """递增字符时间戳的倒放行（PR2 旧数据）保持镜像语义（回归保护）。"""
+    line = _reverse_line(1_000, 2_000)
+    assert reverse_fill_time_ms(line, 1_000) == 2_000
+    assert reverse_fill_time_ms(line, 1_500) == 1_500
+    assert reverse_fill_time_ms(line, 2_000) == 1_000

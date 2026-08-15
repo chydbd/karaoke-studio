@@ -252,8 +252,8 @@ def compute_display_lines(
         vertical_position_of,
     )
     show_times = compute_show_times(
-        [timing_line_start_ms(line) for line in render_lines],
-        [_line_end_ms(line) for line in render_lines],
+        [_line_effective_start_ms(line) for line in render_lines],
+        [_line_effective_end_ms(line) for line in render_lines],
         pages,
         pre_time_ms=max(lead_in_ms, 0),
         post_time_ms=tail,
@@ -343,6 +343,9 @@ def _apply_reverse_spans(
     倒放行的镜像区间决定进度条回退的跨度。每行按**自身演唱区间**
     ``(行首字符起点, 行尾)`` 回退——保证每行的回退落在它自己的显示窗口内
     可见（页级共享区间会让早结束的行在其窗口内始终呈「已唱满」、回退不可见）。
+    携带**递减字符时间戳**的倒放行（SUG 倒放预览输出：反转音频听到序 =
+    文件序、内容按 ``region_end - local`` 落点）按其有效窗口
+    ``(末字符 ts, 首字符 ts)`` 分配——内容在该区间内正向播放。
     """
 
     for page in pages:
@@ -350,10 +353,7 @@ def _apply_reverse_spans(
             line = render_lines[line_index]
             if not (line.reverse_playback and line.chars):
                 continue
-            start = timing_line_start_ms(line)
-            end = line.end_ms
-            if end is None:
-                end = line.chars[-1].start_ms + 1000
+            start, end = _reverse_line_window(line)
             if end > start:
                 line.reverse_span_ms = (start, end)
 
@@ -814,6 +814,19 @@ def compute_char_intervals(
     n = len(chars)
     if n == 0:
         return []
+    # 递减字符时间戳的倒放行（SUG 倒放预览输出）：内容按字符 ts 降序播放，
+    # 字 i 的演唱区间 = [ts_i, ts_{i-1}]（左小右大），首字用兜底时长。
+    if _reverse_decreasing(line):
+        result: list[tuple[int, int]] = []
+        for i, ch in enumerate(chars):
+            if i > 0:
+                end = chars[i - 1].start_ms
+            else:
+                end = ch.start_ms + 500
+            if end < ch.start_ms:
+                end = ch.start_ms
+            result.append((ch.start_ms, end))
+        return result
     result: list[tuple[int, int]] = []
     for i, ch in enumerate(chars):
         if i + 1 < n:
@@ -898,16 +911,22 @@ def char_fill_ratio(char_start_ms: int, char_end_ms: int, t_ms: int) -> float:
 
 
 def reverse_fill_time_ms(line: TimingLine, t_ms: int) -> int:
-    """倒放段（``line.reverse_playback``）的镜像填充时间。
+    """倒放段（``line.reverse_playback``）的填充时间。
 
     倒放段的音频是反向播放的，但歌词仍是实际文字、时间戳按正常顺序递增。
     进度条按镜像时间 ``t' = span_start + span_end - t`` 计算——段起始处
     已唱满、随时间推移高亮边界从后往前回退（已唱部分像倒带一样退回去），
     音频本身不变。镜像区间取 ``line.reverse_span_ms``（渲染时按行写入，
     即行自身演唱区间）；手工构造的行退化为行自身区间。
+
+    携带**递减字符时间戳**的倒放行（SUG 倒放预览打轴输出）不走镜像：
+    它的字符演唱区间本身已按"听到序"反转（``[ts_i, ts_{i-1}]``），内容在
+    行窗口内正向播放，填充时间原样返回 ``t_ms``。
     非倒放行原样返回 ``t_ms``。
     """
     if not line.reverse_playback:
+        return t_ms
+    if _reverse_decreasing(line):
         return t_ms
     if line.reverse_span_ms is not None:
         start, end = line.reverse_span_ms
@@ -946,3 +965,34 @@ def _line_end_ms(line: TimingLine) -> int:
 
 def _line_start_ms(line: TimingLine) -> int:
     return timing_line_start_ms(line)
+
+
+def _reverse_decreasing(line: TimingLine) -> bool:
+    """倒放行是否携带**递减**字符时间戳（SUG 倒放预览打轴输出）。
+
+    递增字符时间戳的倒放行（PR2 旧数据 / 手工 LRC）保持原镜像语义。
+    """
+    if not (line.reverse_playback and line.chars):
+        return False
+    return int(line.chars[-1].start_ms) < int(line.chars[0].start_ms)
+
+
+def _reverse_line_window(line: TimingLine) -> tuple[int, int]:
+    """倒放行的有效演唱窗口（左小右大）。
+
+    - 递减字符 ts（SUG 输出）：内容按字符 ts 降序播放——末字符（ts 最小）
+      最早发声，首字符（ts 最大）最后发声。窗口 = ``(末字符 ts, 首字符 ts)``。
+    - 其他：沿用 ``(行首, 行尾)``。
+    """
+    if _reverse_decreasing(line):
+        starts = [int(c.start_ms) for c in line.chars]
+        return min(starts), max(starts)
+    return timing_line_start_ms(line), _line_end_ms(line)
+
+
+def _line_effective_start_ms(line: TimingLine) -> int:
+    return _reverse_line_window(line)[0]
+
+
+def _line_effective_end_ms(line: TimingLine) -> int:
+    return _reverse_line_window(line)[1]
