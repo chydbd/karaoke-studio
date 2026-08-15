@@ -896,3 +896,33 @@ def test_overlapping_nicokara_repeat_keeps_each_ruby_on_its_source_character() -
         (1, 9, 10, "魔"),
         (1, 11, 12, "罠"),
     ]
+
+
+def test_sug_project_conversion_preserves_reverse_playback():
+    """SUG 倒放段标记必须传入 TimingTrack，否则递减字符被当普通行渲染（跳变/消失）。"""
+    singer = Singer(
+        id="main",
+        name="主唱",
+        color="#ff0000",
+        is_default=True,
+        backend_number=1,
+    )
+    reverse_sentence = Sentence(singer_id=singer.id)
+    reverse_sentence.reverse_playback = True
+    for text, ts in [("ず", 58_660), ("っ", 58_660), ("と", 58_450)]:
+        ch = Character(char=text, ruby=Ruby(parts=[RubyPart("")]), check_count=1)
+        ch.add_timestamp(ts)
+        reverse_sentence.characters.append(ch)
+    normal_sentence = Sentence(singer_id=singer.id)
+    normal_sentence.reverse_playback = False
+    ch = Character(char="あ", ruby=Ruby(parts=[RubyPart("")]), check_count=1)
+    ch.add_timestamp(60_000)
+    normal_sentence.characters.append(ch)
+
+    track = timing_track_from_sug_project(
+        Project(singers=[singer], sentences=[reverse_sentence, normal_sentence])
+    )
+
+    assert [line.reverse_playback for line in track.lines] == [True, False]
+    # 递减字符 ts 原样保留（SUG 倒放预览打轴输出）
+    assert [c.start_ms for c in track.lines[0].chars[:3]] == [58_660, 58_660, 58_450]

@@ -126,6 +126,9 @@ def timing_track_from_sug_project(
                 singer_id=line_singer_index,
                 is_blank=not line_chars,
                 track_line_index=len(lines),
+                reverse_playback=bool(
+                    getattr(sentence, "reverse_playback", False)
+                ),
             )
         )
 
