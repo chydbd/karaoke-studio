@@ -1139,7 +1139,7 @@ def test_native_render_range_respects_preview_dpr_when_exe_exists(monkeypatch):
 
 
 def test_native_gpu_preview_layout_is_scale_invariant_when_exe_exists(
-    qapp,
+    _pinned_qapp,
     monkeypatch,
 ):
     renderer_path = resolve_native_renderer_path(root=Path.cwd())
